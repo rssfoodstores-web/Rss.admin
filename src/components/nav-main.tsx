@@ -15,6 +15,9 @@ import {
     Users,
     ShieldAlert,
     Megaphone,
+    CircleHelp,
+    FileText,
+    Shield,
     type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -114,6 +117,24 @@ const navItems: NavItem[] = [
         title: "Contact Page",
         href: "/dashboard/contact",
         icon: MessageSquare,
+    },
+    {
+        key: "faqs",
+        title: "FAQ Page",
+        href: "/dashboard/faqs",
+        icon: CircleHelp,
+    },
+    {
+        key: "terms",
+        title: "Terms Page",
+        href: "/dashboard/terms",
+        icon: FileText,
+    },
+    {
+        key: "privacy",
+        title: "Privacy Page",
+        href: "/dashboard/privacy",
+        icon: Shield,
     },
     {
         key: "support",

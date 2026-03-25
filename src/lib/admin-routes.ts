@@ -95,6 +95,27 @@ export const ADMIN_ROUTE_DEFINITIONS = [
         allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
     },
     {
+        key: "faqs",
+        title: "FAQ Page",
+        href: "/dashboard/faqs",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
+        key: "terms",
+        title: "Terms Page",
+        href: "/dashboard/terms",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
+        key: "privacy",
+        title: "Privacy Page",
+        href: "/dashboard/privacy",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
         key: "support",
         title: "Support Chat",
         href: "/dashboard/support",
