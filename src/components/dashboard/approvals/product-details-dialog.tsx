@@ -10,6 +10,7 @@ import { approveProduct, rejectProduct } from "@/actions/approvals"
 import { toast } from "sonner"
 import Image from "next/image"
 import { useRouter } from "next/navigation"
+import { getActionError } from "@/lib/action-result"
 
 interface ProductDetailsDialogProps {
     product: any | null
@@ -36,7 +37,9 @@ export function ProductDetailsDialog({ product, open, onOpenChange }: ProductDet
         setLoading(true)
         try {
             const result = await approveProduct(product.id)
-            if (result.error) throw new Error(result.error)
+            const error = getActionError(result)
+
+            if (error) throw new Error(error)
             toast.success("Product approved")
             onOpenChange(false)
             router.refresh()
@@ -48,12 +51,18 @@ export function ProductDetailsDialog({ product, open, onOpenChange }: ProductDet
     }
 
     const handleReject = async () => {
+        if (!window.confirm("Are you sure you want to reject this product?")) {
+            return
+        }
+
         setLoading(true)
         try {
             // Note: If you want to save the reason, you'd update your rejectProduct action to accept it.
             // For now passing just ID.
             const result = await rejectProduct(product.id)
-            if (result.error) throw new Error(result.error)
+            const error = getActionError(result)
+
+            if (error) throw new Error(error)
             toast.success("Product rejected")
             onOpenChange(false)
             router.refresh()

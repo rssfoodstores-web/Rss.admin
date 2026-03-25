@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Loader2, Upload, Video, Image as ImageIcon } from "lucide-react"
 import { createAd } from "@/actions/ads"
-import { toast } from "sonner" // Assuming sonner is installed, if not using basic alert or hook
+import { toast } from "sonner"
+import { getActionError } from "@/lib/action-result"
 
 export function CreateAdDialog() {
     const [open, setOpen] = useState(false)
@@ -31,18 +32,17 @@ export function CreateAdDialog() {
             formData.append("mediaType", mediaType)
 
             const result = await createAd(formData)
+            const error = getActionError(result)
 
-            if (result.error) {
-                // Warning: We need a Toast component here. 
-                // For now, simple alert or console error if sonner isn't set up globally yet
-                alert(result.error)
+            if (error) {
+                toast.error(error)
             } else {
                 setOpen(false)
-                // alert("Ad created successfully!") 
+                toast.success("Ad created successfully")
             }
         } catch (error) {
             console.error(error)
-            alert("An unexpected error occurred")
+            toast.error("An unexpected error occurred")
         } finally {
             setLoading(false)
         }

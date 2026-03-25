@@ -12,9 +12,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Badge } from "@/components/ui/badge"
 import { CheckCircle, XCircle, FileText, User, Bike } from "lucide-react"
 import Image from "next/image"
-import { useState, useTransition } from "react"
+import { useTransition } from "react"
 import { approveRider, rejectRider } from "@/actions/approvals"
 import { useToast } from "@/hooks/use-toast"
+import { getActionError } from "@/lib/action-result"
 
 interface RiderDetailsSheetProps {
     open: boolean
@@ -31,10 +32,12 @@ export function RiderDetailsSheet({ open, onOpenChange, rider }: RiderDetailsShe
     const handleApprove = () => {
         startTransition(async () => {
             const result = await approveRider(rider.id)
-            if (result.error) {
+            const error = getActionError(result)
+
+            if (error) {
                 toast({
                     title: "Error",
-                    description: result.error,
+                    description: error,
                     variant: "destructive",
                 })
             } else {
@@ -48,12 +51,18 @@ export function RiderDetailsSheet({ open, onOpenChange, rider }: RiderDetailsShe
     }
 
     const handleReject = () => {
+        if (!window.confirm("Are you sure you want to reject this rider application?")) {
+            return
+        }
+
         startTransition(async () => {
             const result = await rejectRider(rider.id)
-            if (result.error) {
+            const error = getActionError(result)
+
+            if (error) {
                 toast({
                     title: "Error",
-                    description: result.error,
+                    description: error,
                     variant: "destructive",
                 })
             } else {

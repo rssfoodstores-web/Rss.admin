@@ -7,6 +7,7 @@ import { approveProductPricing, rejectProductPricing } from "@/actions/approvals
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useToast } from "@/hooks/use-toast"
+import { getActionError } from "@/lib/action-result"
 import { formatKobo, nairaToKobo } from "@/lib/money"
 
 interface PricingApprovalControlsProps {
@@ -51,11 +52,12 @@ export function PricingApprovalControls({
             formData.set("insurance_naira", insuranceNaira)
 
             const result = await approveProductPricing(formData)
+            const error = getActionError(result)
 
-            if (result?.error) {
+            if (error) {
                 toast({
                     title: "Approval failed",
-                    description: result.error,
+                    description: error,
                     variant: "destructive",
                 })
                 return
@@ -70,16 +72,21 @@ export function PricingApprovalControls({
     }
 
     const handleReject = () => {
+        if (!window.confirm("Are you sure you want to reject this product pricing request?")) {
+            return
+        }
+
         startTransition(async () => {
             const formData = new FormData()
             formData.set("product_id", productId)
 
             const result = await rejectProductPricing(formData)
+            const error = getActionError(result)
 
-            if (result?.error) {
+            if (error) {
                 toast({
                     title: "Rejection failed",
-                    description: result.error,
+                    description: error,
                     variant: "destructive",
                 })
                 return
