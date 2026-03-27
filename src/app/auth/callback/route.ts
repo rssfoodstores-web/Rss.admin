@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getServerAdminSiteUrl } from "@/lib/site-url";
 import { NextResponse } from "next/server";
 
 function buildErrorRedirect(origin: string, message: string, description?: string | null, errorCode?: string | null) {
@@ -17,10 +18,19 @@ function buildErrorRedirect(origin: string, message: string, description?: strin
     return NextResponse.redirect(url);
 }
 
+function getSafeNextPath(nextPath: string | null) {
+    if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+        return "/dashboard"
+    }
+
+    return nextPath
+}
+
 export async function GET(request: Request) {
-    const { searchParams, origin } = new URL(request.url);
+    const { searchParams } = new URL(request.url);
+    const origin = getServerAdminSiteUrl(request);
     const code = searchParams.get("code");
-    const next = searchParams.get("next") ?? "/dashboard";
+    const next = getSafeNextPath(searchParams.get("next"));
     const oauthError = searchParams.get("error");
     const oauthErrorCode = searchParams.get("error_code");
     const oauthErrorDescription = searchParams.get("error_description");
