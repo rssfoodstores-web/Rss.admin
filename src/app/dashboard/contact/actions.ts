@@ -10,6 +10,7 @@ import {
     type ContactMethodContent,
     type ContactPageContent,
 } from "@/lib/contactPage"
+import type { SocialMediaLink } from "@/types/social-media"
 
 interface SaveContactPageInput {
     form: {
@@ -22,7 +23,26 @@ interface SaveContactPageInput {
     introDescription: string
     introTitle: string
     methods: ContactMethodContent[]
+    newsletter: {
+        buttonText: string
+        description: string
+        emailPlaceholder: string
+        title: string
+    }
     pageTitle: string
+}
+
+export interface NewsletterSubscriptionItem {
+    created_at: string
+    email: string
+    id: string
+    source: string | null
+}
+
+export interface ContactAdminData {
+    content: ContactPageContent
+    newsletterSubscriptions: NewsletterSubscriptionItem[]
+    socialLinks: SocialMediaLink[]
 }
 
 function normalizeText(value: string, fieldName: string) {
@@ -78,23 +98,58 @@ function toStoredValue(input: SaveContactPageInput) {
         intro_description: normalizeText(input.introDescription, "Intro description"),
         intro_title: normalizeText(input.introTitle, "Intro title"),
         methods: validateMethods(input.methods),
+        newsletter: {
+            button_text: normalizeText(input.newsletter.buttonText, "Newsletter button text"),
+            description: normalizeText(input.newsletter.description, "Newsletter description"),
+            email_placeholder: normalizeText(input.newsletter.emailPlaceholder, "Newsletter email placeholder"),
+            title: normalizeText(input.newsletter.title, "Newsletter title"),
+        },
         page_title: normalizeText(input.pageTitle, "Page title"),
     }
 }
 
-export async function getContactAdminData(): Promise<ContactPageContent> {
+export async function getContactAdminData(): Promise<ContactAdminData> {
     const supabase = await requireAdmin()
-    const { data, error } = await supabase
-        .from("app_settings")
-        .select("value")
-        .eq("key", CONTACT_PAGE_SETTING_KEY)
-        .maybeSingle()
+    const [
+        { data: settingData, error: settingError },
+        { data: subscriptionData, error: subscriptionError },
+        { data: socialLinkData, error: socialLinkError },
+    ] = await Promise.all([
+        supabase
+            .from("app_settings")
+            .select("value")
+            .eq("key", CONTACT_PAGE_SETTING_KEY)
+            .maybeSingle(),
+        supabase
+            .from("newsletter_subscriptions")
+            .select("id, email, source, created_at")
+            .order("created_at", { ascending: false })
+            .limit(200),
+        supabase
+            .from("social_media_links")
+            .select("id, platform, url, is_active, created_at, updated_at")
+            .order("created_at", { ascending: false }),
+    ])
 
-    if (error) {
-        throw new Error(error.message)
+    if (settingError) {
+        throw new Error(settingError.message)
     }
 
-    return normalizeContactPageContent(data?.value ?? DEFAULT_CONTACT_PAGE_CONTENT)
+    if (subscriptionError && subscriptionError.code !== "42P01") {
+        throw new Error(subscriptionError.message)
+    }
+
+    if (socialLinkError) {
+        throw new Error(socialLinkError.message)
+    }
+
+    return {
+        content: normalizeContactPageContent(settingData?.value ?? DEFAULT_CONTACT_PAGE_CONTENT),
+        newsletterSubscriptions: subscriptionError?.code === "42P01"
+            ? []
+            : (subscriptionData ?? []) as NewsletterSubscriptionItem[],
+        socialLinks: (socialLinkData ?? []) as SocialMediaLink[],
+    }
 }
 
 export async function saveContactPageContent(input: SaveContactPageInput) {

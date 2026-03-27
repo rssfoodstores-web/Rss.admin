@@ -46,6 +46,13 @@ export const ADMIN_ROUTE_DEFINITIONS = [
         allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
     },
     {
+        key: "delivery_settings",
+        title: "Delivery Settings",
+        href: "/dashboard/delivery-settings",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
         key: "location_access",
         title: "Location Access",
         href: "/dashboard/location-access",

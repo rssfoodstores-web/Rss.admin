@@ -92,17 +92,64 @@ async function createNotification(
 }
 
 export async function updateDeliverySettings(formData: FormData) {
-    const actor = await getActorContext("settings")
+    const actor = await getActorContext("delivery_settings")
     const supabase = actor.supabase
 
+    const baseFareNaira = Number(formData.get("base_fare_naira") ?? 0)
+    const distanceRateNairaPerKm = Number(formData.get("distance_rate_naira_per_km") ?? 0)
+    const riderSharePercent = Number(formData.get("rider_share_percent") ?? 0)
+    const corporateDeliverySharePercent = Number(formData.get("corporate_delivery_share_percent") ?? 0)
+    const originLat = Number(formData.get("origin_lat") ?? 0)
+    const originLng = Number(formData.get("origin_lng") ?? 0)
+    const originState = String(formData.get("origin_state") ?? "Lagos").trim()
+
+    if (
+        !Number.isFinite(baseFareNaira)
+        || !Number.isFinite(distanceRateNairaPerKm)
+        || !Number.isFinite(riderSharePercent)
+        || !Number.isFinite(corporateDeliverySharePercent)
+        || !Number.isFinite(originLat)
+        || !Number.isFinite(originLng)
+    ) {
+        return { error: "Delivery settings must contain valid numbers." }
+    }
+
+    if (baseFareNaira < 0 || distanceRateNairaPerKm < 0) {
+        return { error: "Base fare and distance rate cannot be negative." }
+    }
+
+    if (originLat < -90 || originLat > 90 || originLng < -180 || originLng > 180) {
+        return { error: "Origin latitude or longitude is outside valid geographic bounds." }
+    }
+
+    if (!originState) {
+        return { error: "Origin state is required." }
+    }
+
+    const riderShareBps = Math.round(riderSharePercent * 100)
+    const corporateDeliveryShareBps = Math.round(corporateDeliverySharePercent * 100)
+
+    if (
+        riderShareBps < 0
+        || riderShareBps > 10_000
+        || corporateDeliveryShareBps < 0
+        || corporateDeliveryShareBps > 10_000
+    ) {
+        return { error: "Rider and corporate shares must stay between 0% and 100%." }
+    }
+
+    if (riderShareBps + corporateDeliveryShareBps !== 10_000) {
+        return { error: "Rider and corporate shares must add up to exactly 100%." }
+    }
+
     const value = {
-        base_fare_kobo: nairaToKobo(Number(formData.get("base_fare_naira") ?? 0)),
-        distance_rate_kobo_per_km: nairaToKobo(Number(formData.get("distance_rate_naira_per_km") ?? 0)),
-        rider_share_bps: Math.round(Number(formData.get("rider_share_percent") ?? 0) * 100),
-        corporate_delivery_share_bps: Math.round(Number(formData.get("corporate_delivery_share_percent") ?? 0) * 100),
-        origin_lat: Number(formData.get("origin_lat") ?? 0),
-        origin_lng: Number(formData.get("origin_lng") ?? 0),
-        origin_state: String(formData.get("origin_state") ?? "Lagos"),
+        base_fare_kobo: nairaToKobo(baseFareNaira),
+        distance_rate_kobo_per_km: nairaToKobo(distanceRateNairaPerKm),
+        rider_share_bps: riderShareBps,
+        corporate_delivery_share_bps: corporateDeliveryShareBps,
+        origin_lat: originLat,
+        origin_lng: originLng,
+        origin_state: originState,
     }
 
     const { error } = await upsertSetting(
@@ -125,6 +172,7 @@ export async function updateDeliverySettings(formData: FormData) {
         metadata: value,
     })
 
+    revalidatePath("/dashboard/delivery-settings")
     revalidatePath("/dashboard/settings")
     revalidatePath("/dashboard/orders")
     revalidatePath("/dashboard/reports")

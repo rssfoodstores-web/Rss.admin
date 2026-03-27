@@ -15,7 +15,11 @@ export default async function AdminContactPage() {
                 </p>
             </div>
 
-            <ContactAdminClient initialData={data} />
+            <ContactAdminClient
+                initialData={data.content}
+                initialNewsletterSubscriptions={data.newsletterSubscriptions}
+                initialSocialLinks={data.socialLinks}
+            />
         </div>
     )
 }

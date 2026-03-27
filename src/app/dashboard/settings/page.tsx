@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { createClient } from "@/lib/supabase/server"
-import { updateAssignmentSettings, updateDeliverySettings, updatePlatformFinancialSettings } from "@/actions/platform"
+import { updateAssignmentSettings, updatePlatformFinancialSettings } from "@/actions/platform"
 import { requireAdminRoleAccess } from "@/lib/admin-auth"
 import { formatPercentFromBps } from "@/lib/admin-display"
 import { koboToNaira } from "@/lib/money"
@@ -11,11 +11,6 @@ import { Input } from "@/components/ui/input"
 export default async function SettingsPage() {
     await requireAdminRoleAccess(["supa_admin"], "settings")
     const supabase = await createClient()
-    async function updateDeliverySettingsForm(formData: FormData) {
-        "use server"
-        await updateDeliverySettings(formData)
-    }
-
     async function updatePlatformFinancialSettingsForm(formData: FormData) {
         "use server"
         await updatePlatformFinancialSettings(formData)
@@ -81,6 +76,9 @@ export default async function SettingsPage() {
                 <Link href="/dashboard/referrals" className="rounded-2xl border border-orange-100 bg-orange-50 px-5 py-4 text-sm font-semibold text-[#F58220] transition hover:bg-orange-100 dark:border-orange-950 dark:bg-orange-950/20 dark:text-orange-300">
                     Referral management
                 </Link>
+                <Link href="/dashboard/delivery-settings" className="rounded-2xl border border-orange-100 bg-orange-50 px-5 py-4 text-sm font-semibold text-[#F58220] transition hover:bg-orange-100 dark:border-orange-950 dark:bg-orange-950/20 dark:text-orange-300">
+                    Delivery settings
+                </Link>
                 <Link href="/dashboard/rewards" className="rounded-2xl border border-amber-100 bg-amber-50 px-5 py-4 text-sm font-semibold text-amber-700 transition hover:bg-amber-100 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
                     Reward points management
                 </Link>
@@ -111,44 +109,36 @@ export default async function SettingsPage() {
                 <Card>
                     <CardHeader>
                         <CardTitle>Delivery Settings</CardTitle>
-                        <CardDescription>Base fare, distance rate, origin point, and delivery revenue split.</CardDescription>
+                        <CardDescription>Move delivery pricing and rider payout control into the dedicated operations page.</CardDescription>
                     </CardHeader>
                     <CardContent>
-                        <form action={updateDeliverySettingsForm} className="grid gap-4">
+                        <div className="grid gap-4">
                             <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Base Fare (NGN)</label>
-                                    <Input type="number" step="0.01" min="0" name="base_fare_naira" defaultValue={koboToNaira(Number(delivery.base_fare_kobo ?? 100000))} />
+                                <div className="rounded-2xl border border-orange-100 bg-orange-50/70 p-4 dark:border-orange-900/30 dark:bg-orange-950/10">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-gray-400">Current split</p>
+                                    <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">
+                                        Rider {formatPercentFromBps(Number(delivery.rider_share_bps ?? 8000))} | Corporate {formatPercentFromBps(Number(delivery.corporate_delivery_share_bps ?? 2000))}
+                                    </p>
                                 </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Distance Rate / KM (NGN)</label>
-                                    <Input type="number" step="0.01" min="0" name="distance_rate_naira_per_km" defaultValue={koboToNaira(Number(delivery.distance_rate_kobo_per_km ?? 10000))} />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Rider Share (%)</label>
-                                    <Input type="number" step="0.01" min="0" max="100" name="rider_share_percent" defaultValue={Number(delivery.rider_share_bps ?? 8000) / 100} />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Corporate Share (%)</label>
-                                    <Input type="number" step="0.01" min="0" max="100" name="corporate_delivery_share_percent" defaultValue={Number(delivery.corporate_delivery_share_bps ?? 2000) / 100} />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Origin Latitude</label>
-                                    <Input type="number" step="0.000001" name="origin_lat" defaultValue={Number(delivery.origin_lat ?? 6.5244)} />
-                                </div>
-                                <div className="space-y-1">
-                                    <label className="text-xs font-medium text-muted-foreground">Origin Longitude</label>
-                                    <Input type="number" step="0.000001" name="origin_lng" defaultValue={Number(delivery.origin_lng ?? 3.3792)} />
+                                <div className="rounded-2xl border border-gray-100 bg-gray-50 p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-gray-400">Current origin</p>
+                                    <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">
+                                        {String(delivery.origin_state ?? "Lagos")}
+                                    </p>
+                                    <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">
+                                        {Number(delivery.origin_lat ?? 6.5244).toFixed(4)}, {Number(delivery.origin_lng ?? 3.3792).toFixed(4)}
+                                    </p>
                                 </div>
                             </div>
-                            <div className="space-y-1">
-                                <label className="text-xs font-medium text-muted-foreground">Origin State</label>
-                                <Input name="origin_state" defaultValue={String(delivery.origin_state ?? "Lagos")} />
-                            </div>
-                            <Button type="submit" className="w-fit bg-orange-500 hover:bg-orange-600">
-                                Save Delivery Settings
+                            <p className="text-sm text-muted-foreground">
+                                Use the dedicated page to adjust base fare, per-kilometer pricing, origin coordinates, and the rider payout split with live previews.
+                            </p>
+                            <Button asChild className="w-fit bg-orange-500 hover:bg-orange-600">
+                                <Link href="/dashboard/delivery-settings">
+                                    Open Delivery Settings
+                                </Link>
                             </Button>
-                        </form>
+                        </div>
                     </CardContent>
                 </Card>
 

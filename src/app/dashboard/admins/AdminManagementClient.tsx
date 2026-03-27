@@ -186,7 +186,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                             Grant admin access
                         </Button>
                     </DialogTrigger>
-                    <DialogContent className="max-w-3xl">
+                    <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
                         <DialogHeader>
                             <DialogTitle>Manage dashboard access</DialogTitle>
                             <DialogDescription>

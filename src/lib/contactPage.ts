@@ -20,11 +20,19 @@ export interface ContactFormContent {
     messagePlaceholder: string
 }
 
+export interface NewsletterContent {
+    buttonText: string
+    description: string
+    emailPlaceholder: string
+    title: string
+}
+
 export interface ContactPageContent {
     form: ContactFormContent
     introDescription: string
     introTitle: string
     methods: ContactMethodContent[]
+    newsletter: NewsletterContent
     pageTitle: string
 }
 
@@ -61,6 +69,12 @@ export const DEFAULT_CONTACT_PAGE_CONTENT: ContactPageContent = {
             value: "+234 903 019 854",
         },
     ],
+    newsletter: {
+        buttonText: "Subscribe",
+        description: "Stay updated with the latest products, special offers, and helpful tips. Join our community and never miss an update.",
+        emailPlaceholder: "Your email address",
+        title: "Subscribe to Our Newsletter",
+    },
     pageTitle: "Contact Us",
 }
 
@@ -98,6 +112,9 @@ function normalizeMethods(value: unknown): ContactMethodContent[] {
 export function normalizeContactPageContent(value: unknown): ContactPageContent {
     const row = value && typeof value === "object" ? value as Record<string, unknown> : {}
     const form = row.form && typeof row.form === "object" ? row.form as Record<string, unknown> : {}
+    const newsletter = row.newsletter && typeof row.newsletter === "object"
+        ? row.newsletter as Record<string, unknown>
+        : {}
 
     return {
         form: {
@@ -110,6 +127,12 @@ export function normalizeContactPageContent(value: unknown): ContactPageContent 
         introDescription: normalizeText(row.intro_description, DEFAULT_CONTACT_PAGE_CONTENT.introDescription),
         introTitle: normalizeText(row.intro_title, DEFAULT_CONTACT_PAGE_CONTENT.introTitle),
         methods: normalizeMethods(row.methods),
+        newsletter: {
+            buttonText: normalizeText(newsletter.button_text, DEFAULT_CONTACT_PAGE_CONTENT.newsletter.buttonText),
+            description: normalizeText(newsletter.description, DEFAULT_CONTACT_PAGE_CONTENT.newsletter.description),
+            emailPlaceholder: normalizeText(newsletter.email_placeholder, DEFAULT_CONTACT_PAGE_CONTENT.newsletter.emailPlaceholder),
+            title: normalizeText(newsletter.title, DEFAULT_CONTACT_PAGE_CONTENT.newsletter.title),
+        },
         pageTitle: normalizeText(row.page_title, DEFAULT_CONTACT_PAGE_CONTENT.pageTitle),
     }
 }
@@ -140,4 +163,8 @@ export function buildContactMethodHref(method: ContactMethodContent) {
         default:
             return null
     }
+}
+
+export function getContactMethodByType(methods: ContactMethodContent[], type: ContactMethodType) {
+    return methods.find((method) => method.type === type) ?? null
 }

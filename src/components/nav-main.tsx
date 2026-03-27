@@ -6,6 +6,7 @@ import {
     LayoutDashboard,
     CheckSquare,
     ShoppingCart,
+    Bike,
     Bell,
     MessageSquare,
     MapPin,
@@ -75,6 +76,12 @@ const navItems: NavItem[] = [
         title: "Finance",
         href: "/dashboard/reports",
         icon: Wallet,
+    },
+    {
+        key: "delivery_settings",
+        title: "Delivery Settings",
+        href: "/dashboard/delivery-settings",
+        icon: Bike,
     },
     {
         key: "location_access",
