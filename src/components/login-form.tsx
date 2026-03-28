@@ -20,6 +20,7 @@ import { createClient } from "@/lib/supabase/client"
 import { Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
+import { buildAbsoluteUrl, getClientAdminSiteUrl } from "@/lib/site-url"
 
 export function LoginForm({
     className,
@@ -37,10 +38,11 @@ export function LoginForm({
         try {
             setGoogleLoading(true)
             const supabase = createClient()
+            const redirectTo = buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback")
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo: `${window.location.origin}/auth/callback`,
+                    redirectTo,
                     queryParams: {
                         access_type: 'offline',
                         prompt: 'consent',
@@ -72,7 +74,7 @@ export function LoginForm({
         setLoading(true)
         const supabase = createClient()
         const { error } = await supabase.auth.signInWithPassword({
-            email,
+            email: email.trim().toLowerCase(),
             password
         })
 

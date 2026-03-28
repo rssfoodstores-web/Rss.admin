@@ -10,24 +10,6 @@ import {
     type CookOffScoreboardRow,
     type CookOffSessionRow,
 } from "@/lib/cookOff"
-import type { Tables } from "@/types/database.types"
-
-type HeroSlideRow = Tables<"hero_carousel_slides">
-
-interface SaveHeroSlideInput {
-    bodyText?: string
-    buttonText?: string
-    buttonUrl?: string
-    eyebrowText?: string
-    highlightText?: string
-    isActive: boolean
-    marketingMode: string
-    mediaPublicId: string
-    mediaType: string
-    mediaUrl: string
-    sortOrder: number
-    title: string
-}
 
 interface SaveCookOffSessionInput {
     ctaText?: string
@@ -86,9 +68,7 @@ export interface CookOffAdminEntryViewModel {
 export interface CookOffAdminDashboard {
     entries: CookOffAdminEntryViewModel[]
     sessions: CookOffSessionRow[]
-    slides: HeroSlideRow[]
     stats: {
-        activeSlides: number
         approvedEntries: number
         pendingEntries: number
         rejectedEntries: number
@@ -150,22 +130,13 @@ function buildAdminEntryViewModel(
 
 function revalidateCookOffPaths() {
     revalidatePath("/dashboard/cook-off")
-    revalidatePath("/dashboard/settings")
     revalidatePath("/cook-off")
-    revalidatePath("/")
-    revalidatePath("/retail")
-    revalidatePath("/wholesale")
     revalidatePath("/account/cook-off")
 }
 
 export async function getCookOffAdminData(): Promise<CookOffAdminDashboard> {
     const { supabase } = await requireAdmin()
-    const [{ data: slidesData, error: slidesError }, { data: sessionsData, error: sessionsError }, { data: entriesData, error: entriesError }, { data: scoreboardData, error: scoreboardError }] = await Promise.all([
-        supabase
-            .from("hero_carousel_slides")
-            .select("*")
-            .order("sort_order", { ascending: true })
-            .order("created_at", { ascending: true }),
+    const [{ data: sessionsData, error: sessionsError }, { data: entriesData, error: entriesError }, { data: scoreboardData, error: scoreboardError }] = await Promise.all([
         supabase
             .from("cook_off_sessions")
             .select("*")
@@ -179,12 +150,10 @@ export async function getCookOffAdminData(): Promise<CookOffAdminDashboard> {
             .select("*"),
     ])
 
-    if (slidesError) throw new Error(slidesError.message)
     if (sessionsError) throw new Error(sessionsError.message)
     if (entriesError) throw new Error(entriesError.message)
     if (scoreboardError) throw new Error(scoreboardError.message)
 
-    const slides = (slidesData ?? []) as HeroSlideRow[]
     const sessions = (sessionsData ?? []) as CookOffSessionRow[]
     const entries = (entriesData ?? []) as CookOffEntryRow[]
     const rankingsBySession = groupCookOffRankingsBySession((scoreboardData ?? []) as CookOffScoreboardRow[])
@@ -198,9 +167,7 @@ export async function getCookOffAdminData(): Promise<CookOffAdminDashboard> {
             buildAdminEntryViewModel(entry, sessionsById.get(entry.session_id), rankingsByEntryId.get(entry.id))
         ),
         sessions,
-        slides,
         stats: {
-            activeSlides: slides.filter((slide) => slide.is_active).length,
             approvedEntries: entries.filter((entry) => entry.status === "approved").length,
             pendingEntries: entries.filter((entry) => entry.status === "pending").length,
             rejectedEntries: entries.filter((entry) => entry.status === "rejected").length,
@@ -229,114 +196,6 @@ async function archiveOtherActiveSessions(excludedId: string | null, updatedBy: 
     if (error) {
         throw new Error(error.message)
     }
-}
-
-export async function createHeroSlide(input: SaveHeroSlideInput) {
-    const { supabase, user } = await requireAdmin()
-
-    if (!input.title.trim()) {
-        throw new Error("Slide title is required.")
-    }
-
-    const { error } = await supabase.from("hero_carousel_slides").insert({
-        body_text: nullIfEmpty(input.bodyText),
-        button_text: nullIfEmpty(input.buttonText),
-        button_url: nullIfEmpty(input.buttonUrl),
-        created_by: user.id,
-        eyebrow_text: nullIfEmpty(input.eyebrowText),
-        highlight_text: nullIfEmpty(input.highlightText),
-        is_active: input.isActive,
-        marketing_mode: input.marketingMode || "standard",
-        media_public_id: input.mediaPublicId.trim(),
-        media_type: input.mediaType,
-        media_url: input.mediaUrl.trim(),
-        sort_order: Number.isFinite(input.sortOrder) ? input.sortOrder : 0,
-        title: input.title.trim(),
-        updated_by: user.id,
-    })
-
-    if (error) {
-        throw new Error(error.message)
-    }
-
-    revalidateCookOffPaths()
-    return { success: true }
-}
-
-export async function updateHeroSlide(slideId: string, input: SaveHeroSlideInput) {
-    const { supabase, user } = await requireAdmin()
-    const { data: existingSlide, error: existingError } = await supabase
-        .from("hero_carousel_slides")
-        .select("*")
-        .eq("id", slideId)
-        .single()
-
-    if (existingError) {
-        throw new Error(existingError.message)
-    }
-
-    const { error } = await supabase
-        .from("hero_carousel_slides")
-        .update({
-            body_text: nullIfEmpty(input.bodyText),
-            button_text: nullIfEmpty(input.buttonText),
-            button_url: nullIfEmpty(input.buttonUrl),
-            eyebrow_text: nullIfEmpty(input.eyebrowText),
-            highlight_text: nullIfEmpty(input.highlightText),
-            is_active: input.isActive,
-            marketing_mode: input.marketingMode || "standard",
-            media_public_id: input.mediaPublicId.trim(),
-            media_type: input.mediaType,
-            media_url: input.mediaUrl.trim(),
-            sort_order: Number.isFinite(input.sortOrder) ? input.sortOrder : 0,
-            title: input.title.trim(),
-            updated_by: user.id,
-        })
-        .eq("id", slideId)
-
-    if (error) {
-        throw new Error(error.message)
-    }
-
-    try {
-        if (existingSlide.media_public_id !== input.mediaPublicId.trim()) {
-            await deleteCookOffCloudinaryAsset(existingSlide.media_public_id, existingSlide.media_type as "image" | "video")
-        }
-    } catch {
-    }
-
-    revalidateCookOffPaths()
-    return { success: true }
-}
-
-export async function deleteHeroSlide(slideId: string) {
-    const { supabase } = await requireAdmin()
-    const { data: existingSlide, error: existingError } = await supabase
-        .from("hero_carousel_slides")
-        .select("*")
-        .eq("id", slideId)
-        .single()
-
-    if (existingError) {
-        throw new Error(existingError.message)
-    }
-
-    const { error } = await supabase
-        .from("hero_carousel_slides")
-        .delete()
-        .eq("id", slideId)
-
-    if (error) {
-        throw new Error(error.message)
-    }
-
-    try {
-        await deleteCookOffCloudinaryAsset(existingSlide.media_public_id, existingSlide.media_type as "image" | "video")
-    } catch {
-    }
-
-    revalidateCookOffPaths()
-    return { success: true }
 }
 
 export async function createCookOffSession(input: SaveCookOffSessionInput) {

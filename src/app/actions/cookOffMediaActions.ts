@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server"
 import cloudinary from "@/lib/cloudinary"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
+import type { AdminRouteKey } from "@/lib/admin-routes"
 
 type CloudinaryResourceType = "image" | "video"
 type AdminUploadTarget = "hero-slide" | "session-hero"
@@ -53,8 +54,8 @@ async function requireAuthenticatedUser() {
     }
 }
 
-async function requireAdminUser() {
-    return requireAdminRouteAccess("cook_off")
+async function requireAdminUser(permissionKey: AdminRouteKey) {
+    return requireAdminRouteAccess(permissionKey)
 }
 
 function isAdminManagedCookOffAsset(publicId: string) {
@@ -88,7 +89,7 @@ export async function createAdminCookOffUploadSignature(
     resourceType: CloudinaryResourceType,
     target: AdminUploadTarget
 ) {
-    await requireAdminUser()
+    await requireAdminUser(target === "hero-slide" ? "hero_section" : "cook_off")
     const { apiKey, apiSecret, cloudName } = getUploadConfig()
 
     const folder =

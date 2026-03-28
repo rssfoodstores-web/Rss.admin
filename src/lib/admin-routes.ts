@@ -67,6 +67,13 @@ export const ADMIN_ROUTE_DEFINITIONS = [
         allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
     },
     {
+        key: "hero_section",
+        title: "Hero Section",
+        href: "/dashboard/hero-section",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
         key: "referrals",
         title: "Referrals",
         href: "/dashboard/referrals",

@@ -85,11 +85,17 @@ export default async function SettingsPage() {
                 <Link href="/dashboard/cook-off" className="rounded-2xl border border-violet-100 bg-violet-50 px-5 py-4 text-sm font-semibold text-violet-700 transition hover:bg-violet-100 dark:border-violet-900/40 dark:bg-violet-950/20 dark:text-violet-300">
                     Cook-Off management
                 </Link>
+                <Link href="/dashboard/hero-section" className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    Hero section management
+                </Link>
                 <Link href="/dashboard/discount-bundles" className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
                     Discount bundle management
                 </Link>
                 <Link href="/dashboard/contact" className="rounded-2xl border border-sky-100 bg-sky-50 px-5 py-4 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 dark:border-sky-900/40 dark:bg-sky-950/20 dark:text-sky-300">
                     Contact page management
+                </Link>
+                <Link href="/dashboard/settings/wallet-withdrawals" className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-4 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    Wallet withdrawal rules
                 </Link>
                 <Link href="/dashboard/faqs" className="rounded-2xl border border-orange-100 bg-orange-50 px-5 py-4 text-sm font-semibold text-orange-700 transition hover:bg-orange-100 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-300">
                     FAQ page management

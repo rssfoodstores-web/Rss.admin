@@ -11,7 +11,7 @@ export default async function AdminCookOffPage() {
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Cook-Off Management</h1>
                 <p className="text-gray-500 dark:text-gray-400">
-                    Control hero marketing slides, monthly sessions, participant reviews, and copy-ready contact lists.
+                    Control monthly sessions, participant reviews, and copy-ready contact lists for the Cook-Off program.
                 </p>
             </div>
 

@@ -16,32 +16,65 @@ export type Database = {
         Tables: {
             ads: {
                 Row: {
+                    body: string | null
+                    campaign_ends_at: string | null
+                    campaign_starts_at: string | null
+                    click_count: number
+                    click_url: string
+                    cta_label: string
                     created_at: string | null
                     id: string
+                    impression_count: number
                     is_active: boolean | null
+                    last_click_at: string | null
+                    last_impression_at: string | null
                     media_type: string | null
                     media_url: string
+                    placement: string
                     public_id: string | null
+                    sort_order: number
                     title: string
                     updated_at: string | null
                 }
                 Insert: {
+                    body?: string | null
+                    campaign_ends_at?: string | null
+                    campaign_starts_at?: string | null
+                    click_count?: number
+                    click_url?: string
+                    cta_label?: string
                     created_at?: string | null
                     id?: string
+                    impression_count?: number
                     is_active?: boolean | null
+                    last_click_at?: string | null
+                    last_impression_at?: string | null
                     media_type?: string | null
                     media_url: string
+                    placement?: string
                     public_id?: string | null
+                    sort_order?: number
                     title: string
                     updated_at?: string | null
                 }
                 Update: {
+                    body?: string | null
+                    campaign_ends_at?: string | null
+                    campaign_starts_at?: string | null
+                    click_count?: number
+                    click_url?: string
+                    cta_label?: string
                     created_at?: string | null
                     id?: string
+                    impression_count?: number
                     is_active?: boolean | null
+                    last_click_at?: string | null
+                    last_impression_at?: string | null
                     media_type?: string | null
                     media_url?: string
+                    placement?: string
                     public_id?: string | null
+                    sort_order?: number
                     title?: string
                     updated_at?: string | null
                 }
@@ -1869,9 +1902,33 @@ export type Database = {
                 }
                 Returns: Json
             }
+            initiate_wallet_withdrawal: {
+                Args: {
+                    p_wallet_id: string
+                    amount_kobo: number
+                    bank_code: string
+                    account_number: string
+                    bank_name: string
+                    reference: string
+                    description: string
+                }
+                Returns: Json
+            }
             lookup_gift_card_recipient: {
                 Args: {
                     p_email: string
+                }
+                Returns: Json
+            }
+            record_ad_click: {
+                Args: {
+                    p_ad_id: string
+                }
+                Returns: Json
+            }
+            record_ad_impression: {
+                Args: {
+                    p_ad_id: string
                 }
                 Returns: Json
             }

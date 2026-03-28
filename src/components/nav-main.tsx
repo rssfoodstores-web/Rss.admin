@@ -16,6 +16,7 @@ import {
     Users,
     ShieldAlert,
     Megaphone,
+    Sparkles,
     CircleHelp,
     FileText,
     Shield,
@@ -94,6 +95,12 @@ const navItems: NavItem[] = [
         title: "Ads",
         href: "/dashboard/ads",
         icon: Megaphone,
+    },
+    {
+        key: "hero_section",
+        title: "Hero Section",
+        href: "/dashboard/hero-section",
+        icon: Sparkles,
     },
     {
         key: "referrals",

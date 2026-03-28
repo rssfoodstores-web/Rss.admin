@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server"
 import { nairaToKobo } from "@/lib/money"
 import { type AdminRouteKey, getPrimaryAdminRole } from "@/lib/admin-routes"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
+import { WALLET_WITHDRAWAL_SETTINGS_KEY } from "@/lib/wallet-withdrawal-settings"
 
 async function getActorContext(permissionKey: AdminRouteKey) {
     const access = await requireAdminRouteAccess(permissionKey)
@@ -250,6 +251,46 @@ export async function updateAssignmentSettings(formData: FormData) {
 
     revalidatePath("/dashboard/settings")
     revalidatePath("/dashboard/orders")
+    revalidatePath("/dashboard/audit-logs")
+    return { success: true }
+}
+
+export async function updateWalletWithdrawalSettings(formData: FormData) {
+    const actor = await getActorContext("settings")
+    const supabase = actor.supabase
+
+    const roleWalletWithdrawalMode = String(formData.get("role_wallet_withdrawal_mode") ?? "month_end_only")
+
+    if (!["anytime", "month_end_only"].includes(roleWalletWithdrawalMode)) {
+        return { error: "Choose a valid operational wallet withdrawal mode." }
+    }
+
+    const value = {
+        role_wallet_withdrawal_mode: roleWalletWithdrawalMode,
+    }
+
+    const { error } = await upsertSetting(
+        supabase,
+        WALLET_WITHDRAWAL_SETTINGS_KEY,
+        value,
+        "Controls whether operational role wallets can be withdrawn anytime or only on the last day of the month in Africa/Lagos."
+    )
+
+    if (error) {
+        return { error: error.message }
+    }
+
+    await writeAuditLog(supabase, {
+        actorId: actor.user.id,
+        actorRole: actor.actorRole,
+        action: "update_wallet_withdrawal_settings",
+        entityType: "app_setting",
+        entityId: WALLET_WITHDRAWAL_SETTINGS_KEY,
+        metadata: value,
+    })
+
+    revalidatePath("/dashboard/settings")
+    revalidatePath("/dashboard/settings/wallet-withdrawals")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
