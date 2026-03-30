@@ -32,9 +32,9 @@ export function getClientAdminSiteUrl() {
         return getConfiguredAdminSiteUrl()
     }
 
-    return isLocalHostName(window.location.hostname)
-        ? window.location.origin
-        : getConfiguredAdminSiteUrl()
+    // In the browser, we should always default to the current origin
+    // to ensure OAuth state cookies are preserved on the same domain.
+    return window.location.origin
 }
 
 export function getServerAdminSiteUrl(request?: Request) {
