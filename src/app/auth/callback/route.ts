@@ -1,4 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
+import { isPkceCodeVerifierMissingError } from "@/lib/auth-callback";
+import { getSafeNextPath } from "@/lib/auth-redirects";
 import { getServerAdminSiteUrl } from "@/lib/site-url";
 import { NextResponse } from "next/server";
 
@@ -16,14 +18,6 @@ function buildErrorRedirect(origin: string, message: string, description?: strin
     }
 
     return NextResponse.redirect(url);
-}
-
-function getSafeNextPath(nextPath: string | null) {
-    if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
-        return "/dashboard"
-    }
-
-    return nextPath
 }
 
 export async function GET(request: Request) {
@@ -49,10 +43,21 @@ export async function GET(request: Request) {
         const supabase = await createClient();
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (!error) {
-            return NextResponse.redirect(`${origin}${next}`);
+            return NextResponse.redirect(`${origin}${next ?? "/dashboard"}`);
         }
 
         console.error("OAuth code exchange failed:", error);
+
+        if (isPkceCodeVerifierMissingError(error)) {
+            const fallbackUrl = new URL("/auth/callback-fallback", `${origin}/`)
+            fallbackUrl.searchParams.set("code", code)
+
+            if (next) {
+                fallbackUrl.searchParams.set("next", next)
+            }
+
+            return NextResponse.redirect(fallbackUrl)
+        }
 
         return buildErrorRedirect(
             origin,
