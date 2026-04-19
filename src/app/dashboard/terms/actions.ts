@@ -102,6 +102,7 @@ export async function saveTermsPageContent(input: DocumentPageContent) {
         throw new Error(error.message)
     }
 
+    revalidatePath("/terms")
     revalidatePath("/dashboard/terms")
     revalidatePath("/dashboard/settings")
 

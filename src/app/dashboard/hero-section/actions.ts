@@ -20,6 +20,7 @@ interface SaveHeroSlideInput {
     bodyText?: string
     buttonText?: string
     buttonUrl?: string
+    displayDurationSeconds: number
     eyebrowText?: string
     highlightText?: string
     isActive: boolean
@@ -98,6 +99,16 @@ function normalizeMarketingMode(value: string | null | undefined) {
 
 function normalizeMediaType(value: string | null | undefined) {
     return value === "video" ? "video" : "image"
+}
+
+function normalizeDisplayDurationSeconds(value: number | null | undefined) {
+    const normalized = Math.trunc(Number(value ?? 7))
+
+    if (!Number.isFinite(normalized)) {
+        return 7
+    }
+
+    return Math.min(Math.max(normalized, 2), 60)
 }
 
 function revalidateHeroPaths() {
@@ -224,6 +235,7 @@ export async function createHeroSlide(input: SaveHeroSlideInput) {
         button_text: nullIfEmpty(input.buttonText),
         button_url: nullIfEmpty(input.buttonUrl),
         created_by: actor.user.id,
+        display_duration_seconds: normalizeDisplayDurationSeconds(input.displayDurationSeconds),
         eyebrow_text: nullIfEmpty(input.eyebrowText),
         highlight_text: nullIfEmpty(input.highlightText),
         is_active: input.isActive,
@@ -286,6 +298,7 @@ export async function updateHeroSlide(slideId: string, input: SaveHeroSlideInput
         body_text: nullIfEmpty(input.bodyText),
         button_text: nullIfEmpty(input.buttonText),
         button_url: nullIfEmpty(input.buttonUrl),
+        display_duration_seconds: normalizeDisplayDurationSeconds(input.displayDurationSeconds),
         eyebrow_text: nullIfEmpty(input.eyebrowText),
         highlight_text: nullIfEmpty(input.highlightText),
         is_active: input.isActive,

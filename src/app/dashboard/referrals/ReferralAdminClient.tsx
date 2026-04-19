@@ -183,7 +183,7 @@ export function ReferralAdminClient({ initialData }: { initialData: ReferralAdmi
                                         <div>
                                             <p className="font-semibold text-gray-900 dark:text-white">{item.fullName}</p>
                                             <p className="mt-1 text-xs uppercase tracking-[0.16em] text-gray-400">
-                                                {item.referralCode} · {item.totalReferrals} referrals · {item.rewardEvents} rewards
+                                                {item.referralCode} | {item.totalReferrals} referrals | {item.rewardEvents} rewards
                                             </p>
                                         </div>
                                     </div>

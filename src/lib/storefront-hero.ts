@@ -1,5 +1,10 @@
 export const STOREFRONT_HERO_DEFAULT_SETTING_KEY = "storefront_hero_default_slide" as const
 
+const MANAGED_MARKETING_DESTINATIONS = {
+    cook_off: "/cook-off",
+    discount_bundles: "/discount-bundles",
+} as const
+
 export interface StorefrontHeroDefaultDraft {
     bodyText: string
     buttonText: string
@@ -72,4 +77,20 @@ export function serializeStorefrontHeroDefaultDraft(draft: StorefrontHeroDefault
         media_url: mediaUrl,
         title: draft.title.trim() || DEFAULT_STOREFRONT_HERO_DRAFT.title,
     }
+}
+
+export function isManagedStorefrontHeroMarketingMode(marketingMode: string) {
+    return marketingMode === "cook_off" || marketingMode === "discount_bundles"
+}
+
+export function resolveStorefrontHeroDestination(marketingMode: string, buttonUrl: string) {
+    if (marketingMode === "cook_off") {
+        return MANAGED_MARKETING_DESTINATIONS.cook_off
+    }
+
+    if (marketingMode === "discount_bundles") {
+        return MANAGED_MARKETING_DESTINATIONS.discount_bundles
+    }
+
+    return buttonUrl.trim() || DEFAULT_STOREFRONT_HERO_DRAFT.buttonUrl
 }

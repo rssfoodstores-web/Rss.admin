@@ -38,11 +38,22 @@ const SOCIAL_PLATFORMS = [
     "Other"
 ]
 
-const formSchema = z.object({
-    platform: z.string().min(1, "Please select a platform"),
-    url: z.string().url("Please enter a valid URL"),
-    is_active: z.boolean(),
-})
+const formSchema = z
+    .object({
+        custom_platform: z.string().trim().optional(),
+        is_active: z.boolean(),
+        platform: z.string().min(1, "Please select a platform"),
+        url: z.string().trim().url("Please enter a valid URL"),
+    })
+    .superRefine((value, ctx) => {
+        if (value.platform === "Other" && !value.custom_platform?.trim()) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                message: "Enter a custom platform name.",
+                path: ["custom_platform"],
+            })
+        }
+    })
 
 type FormData = z.infer<typeof formSchema>
 
@@ -55,30 +66,42 @@ export function SocialMediaForm({ initialData, onSuccess }: SocialMediaFormProps
     const [isLoading, setIsLoading] = useState(false)
     const { toast } = useToast()
     const supabase = createClient()
+    const initialPlatform = initialData?.platform && SOCIAL_PLATFORMS.includes(initialData.platform)
+        ? initialData.platform
+        : initialData?.platform
+            ? "Other"
+            : ""
 
     const {
         register,
         handleSubmit,
         control,
+        watch,
         formState: { errors },
     } = useForm<FormData>({
         resolver: zodResolver(formSchema),
         defaultValues: {
-            platform: initialData?.platform || "",
+            custom_platform: initialPlatform === "Other" ? initialData?.platform || "" : "",
+            platform: initialPlatform,
             url: initialData?.url || "",
             is_active: initialData?.is_active ?? true,
         },
     })
+    const selectedPlatform = watch("platform")
 
     const onSubmit = async (data: FormData) => {
         setIsLoading(true)
         try {
+            const platform = data.platform === "Other"
+                ? data.custom_platform?.trim() ?? ""
+                : data.platform.trim()
+
             if (initialData) {
                 const { error } = await supabase
                     .from("social_media_links")
                     .update({
-                        platform: data.platform,
-                        url: data.url,
+                        platform,
+                        url: data.url.trim(),
                         is_active: data.is_active,
                         updated_at: new Date().toISOString(),
                     })
@@ -93,8 +116,8 @@ export function SocialMediaForm({ initialData, onSuccess }: SocialMediaFormProps
                 const { error } = await supabase
                     .from("social_media_links")
                     .insert({
-                        platform: data.platform,
-                        url: data.url,
+                        platform,
+                        url: data.url.trim(),
                         is_active: data.is_active,
                     })
 
@@ -105,10 +128,11 @@ export function SocialMediaForm({ initialData, onSuccess }: SocialMediaFormProps
                 })
             }
             onSuccess?.()
-        } catch (error: any) {
+        } catch (error: unknown) {
+            const description = error instanceof Error ? error.message : "Something went wrong."
             toast({
                 title: "Error",
-                description: error.message || "Something went wrong.",
+                description,
                 variant: "destructive",
             })
         } finally {
@@ -124,7 +148,7 @@ export function SocialMediaForm({ initialData, onSuccess }: SocialMediaFormProps
                     control={control}
                     name="platform"
                     render={({ field }) => (
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value}>
                             <SelectTrigger>
                                 <SelectValue placeholder="Select platform" />
                             </SelectTrigger>
@@ -142,6 +166,20 @@ export function SocialMediaForm({ initialData, onSuccess }: SocialMediaFormProps
                     <p className="text-sm text-red-500">{errors.platform.message}</p>
                 )}
             </div>
+
+            {selectedPlatform === "Other" ? (
+                <div className="space-y-2">
+                    <Label htmlFor="custom_platform">Custom platform name</Label>
+                    <Input
+                        id="custom_platform"
+                        placeholder="e.g. Threads, Snapchat, Blog"
+                        {...register("custom_platform")}
+                    />
+                    {errors.custom_platform && (
+                        <p className="text-sm text-red-500">{errors.custom_platform.message}</p>
+                    )}
+                </div>
+            ) : null}
 
             <div className="space-y-2">
                 <Label htmlFor="url">URL</Label>

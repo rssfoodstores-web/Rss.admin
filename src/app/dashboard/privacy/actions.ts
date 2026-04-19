@@ -102,6 +102,7 @@ export async function savePrivacyPageContent(input: DocumentPageContent) {
         throw new Error(error.message)
     }
 
+    revalidatePath("/privacy")
     revalidatePath("/dashboard/privacy")
     revalidatePath("/dashboard/settings")
 

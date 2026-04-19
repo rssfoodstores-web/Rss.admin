@@ -80,6 +80,7 @@ export async function saveFaqPageContent(input: FaqPageContent) {
         throw new Error(error.message)
     }
 
+    revalidatePath("/faqs")
     revalidatePath("/dashboard/faqs")
     revalidatePath("/dashboard/settings")
 

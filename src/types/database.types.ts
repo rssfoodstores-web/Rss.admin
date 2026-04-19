@@ -683,6 +683,7 @@ export type Database = {
                     button_url: string | null
                     created_at: string
                     created_by: string | null
+                    display_duration_seconds: number
                     eyebrow_text: string | null
                     highlight_text: string | null
                     id: string
@@ -705,6 +706,7 @@ export type Database = {
                     button_url?: string | null
                     created_at?: string
                     created_by?: string | null
+                    display_duration_seconds?: number
                     eyebrow_text?: string | null
                     highlight_text?: string | null
                     id?: string
@@ -727,6 +729,7 @@ export type Database = {
                     button_url?: string | null
                     created_at?: string
                     created_by?: string | null
+                    display_duration_seconds?: number
                     eyebrow_text?: string | null
                     highlight_text?: string | null
                     id?: string

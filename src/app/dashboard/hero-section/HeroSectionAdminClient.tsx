@@ -21,6 +21,8 @@ import { uploadSignedCloudinaryAsset } from "@/lib/cloudinaryMediaUpload"
 import {
     type StorefrontHeroDefaultDraft,
     DEFAULT_STOREFRONT_HERO_DRAFT,
+    isManagedStorefrontHeroMarketingMode,
+    resolveStorefrontHeroDestination,
 } from "@/lib/storefront-hero"
 import type { Tables } from "@/types/database.types"
 import {
@@ -35,6 +37,7 @@ import {
 type HeroSlideRow = Tables<"hero_carousel_slides">
 
 interface HeroSlideFormState extends StorefrontHeroDefaultDraft {
+    displayDurationSeconds: number
     isActive: boolean
     sortOrder: number
 }
@@ -44,6 +47,7 @@ function buildSlideForm(slide?: HeroSlideRow | null): HeroSlideFormState {
         bodyText: slide?.body_text ?? "",
         buttonText: slide?.button_text ?? "",
         buttonUrl: slide?.button_url ?? "",
+        displayDurationSeconds: slide?.display_duration_seconds ?? 7,
         eyebrowText: slide?.eyebrow_text ?? "",
         highlightText: slide?.highlight_text ?? "",
         isActive: slide?.is_active ?? true,
@@ -71,6 +75,18 @@ function buildDefaultForm(draft?: StorefrontHeroDefaultDraft | null): Storefront
     }
 }
 
+function getMarketingModeHelper(marketingMode: string) {
+    if (marketingMode === "cook_off") {
+        return "This CTA always opens the live Cook-Off page at /cook-off."
+    }
+
+    if (marketingMode === "discount_bundles") {
+        return "This CTA always opens the live discount bundles page at /discount-bundles."
+    }
+
+    return "Standard slides use the custom button URL you enter below."
+}
+
 export function HeroSectionAdminClient({ initialData }: { initialData: StorefrontHeroAdminDashboard }) {
     const router = useRouter()
     const [editingSlideId, setEditingSlideId] = useState<string | null>(initialData.slides[0]?.id ?? null)
@@ -79,6 +95,10 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
     const [savingDefault, setSavingDefault] = useState(false)
     const [resettingDefault, setResettingDefault] = useState(false)
     const [savingSlide, setSavingSlide] = useState(false)
+    const defaultDestination = resolveStorefrontHeroDestination(defaultForm.marketingMode, defaultForm.buttonUrl)
+    const defaultUsesManagedDestination = isManagedStorefrontHeroMarketingMode(defaultForm.marketingMode)
+    const slideDestination = resolveStorefrontHeroDestination(slideForm.marketingMode, slideForm.buttonUrl)
+    const slideUsesManagedDestination = isManagedStorefrontHeroMarketingMode(slideForm.marketingMode)
 
     async function uploadHeroAsset(file: File, mediaType: "image" | "video") {
         return uploadSignedCloudinaryAsset(
@@ -222,7 +242,13 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                     <Input value={defaultForm.eyebrowText} onChange={(event) => setDefaultForm((current) => ({ ...current, eyebrowText: event.target.value }))} placeholder="Eyebrow text" className="h-11 rounded-2xl" />
                     <Input value={defaultForm.highlightText} onChange={(event) => setDefaultForm((current) => ({ ...current, highlightText: event.target.value }))} placeholder="Highlight text" className="h-11 rounded-2xl" />
                     <Input value={defaultForm.buttonText} onChange={(event) => setDefaultForm((current) => ({ ...current, buttonText: event.target.value }))} placeholder="Button text" className="h-11 rounded-2xl" />
-                    <Input value={defaultForm.buttonUrl} onChange={(event) => setDefaultForm((current) => ({ ...current, buttonUrl: event.target.value }))} placeholder="Button URL" className="h-11 rounded-2xl" />
+                    <Input
+                        value={defaultUsesManagedDestination ? defaultDestination : defaultForm.buttonUrl}
+                        onChange={(event) => setDefaultForm((current) => ({ ...current, buttonUrl: event.target.value }))}
+                        placeholder="Button URL"
+                        disabled={defaultUsesManagedDestination}
+                        className="h-11 rounded-2xl"
+                    />
                     <select value={defaultForm.marketingMode} onChange={(event) => setDefaultForm((current) => ({ ...current, marketingMode: event.target.value }))} className="h-11 rounded-2xl border border-gray-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
                         <option value="standard">Standard</option>
                         <option value="cook_off">Cook-Off</option>
@@ -234,6 +260,10 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                     </select>
                     <Input value={defaultForm.mediaUrl} onChange={(event) => setDefaultForm((current) => ({ ...current, mediaUrl: event.target.value }))} placeholder="Media URL" className="h-11 rounded-2xl" />
                 </div>
+
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {getMarketingModeHelper(defaultForm.marketingMode)} Destination: <span className="font-semibold">{defaultDestination}</span>
+                </p>
 
                 <Textarea value={defaultForm.bodyText} onChange={(event) => setDefaultForm((current) => ({ ...current, bodyText: event.target.value }))} placeholder="Slide body text" className="min-h-24 rounded-2xl" />
                 <input type="file" accept={defaultForm.mediaType === "video" ? "video/*" : "image/*"} onChange={(event) => {
@@ -279,7 +309,7 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                                         <Badge>{slide.marketing_mode}</Badge>
                                         {slide.is_active ? <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700">Active</Badge> : <Badge className="border-slate-200 bg-slate-50 text-slate-700">Inactive</Badge>}
                                     </div>
-                                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Order {slide.sort_order} - {slide.media_type}</p>
+                                    <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Order {slide.sort_order} - {slide.media_type} - {slide.display_duration_seconds}s</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="button" variant="outline" className="rounded-full" onClick={() => selectSlide(slide)}>Edit</Button>
@@ -298,8 +328,23 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                     <Input value={slideForm.eyebrowText} onChange={(event) => setSlideForm((current) => ({ ...current, eyebrowText: event.target.value }))} placeholder="Eyebrow text" className="h-11 rounded-2xl" />
                     <Input value={slideForm.highlightText} onChange={(event) => setSlideForm((current) => ({ ...current, highlightText: event.target.value }))} placeholder="Highlight text" className="h-11 rounded-2xl" />
                     <Input value={slideForm.buttonText} onChange={(event) => setSlideForm((current) => ({ ...current, buttonText: event.target.value }))} placeholder="Button text" className="h-11 rounded-2xl" />
-                    <Input value={slideForm.buttonUrl} onChange={(event) => setSlideForm((current) => ({ ...current, buttonUrl: event.target.value }))} placeholder="Button URL" className="h-11 rounded-2xl" />
+                    <Input
+                        value={slideUsesManagedDestination ? slideDestination : slideForm.buttonUrl}
+                        onChange={(event) => setSlideForm((current) => ({ ...current, buttonUrl: event.target.value }))}
+                        placeholder="Button URL"
+                        disabled={slideUsesManagedDestination}
+                        className="h-11 rounded-2xl"
+                    />
                     <Input type="number" value={slideForm.sortOrder} onChange={(event) => setSlideForm((current) => ({ ...current, sortOrder: Number.parseInt(event.target.value, 10) || 0 }))} placeholder="Sort order" className="h-11 rounded-2xl" />
+                    <Input
+                        type="number"
+                        min={2}
+                        max={60}
+                        value={slideForm.displayDurationSeconds}
+                        onChange={(event) => setSlideForm((current) => ({ ...current, displayDurationSeconds: Number.parseInt(event.target.value, 10) || 7 }))}
+                        placeholder="Slide duration (seconds)"
+                        className="h-11 rounded-2xl"
+                    />
                     <select value={slideForm.marketingMode} onChange={(event) => setSlideForm((current) => ({ ...current, marketingMode: event.target.value }))} className="h-11 rounded-2xl border border-gray-200 bg-white px-3 text-sm dark:border-zinc-700 dark:bg-zinc-900">
                         <option value="standard">Standard</option>
                         <option value="cook_off">Cook-Off</option>
@@ -310,6 +355,10 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                         <option value="video">Video</option>
                     </select>
                 </div>
+
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {getMarketingModeHelper(slideForm.marketingMode)} Destination: <span className="font-semibold">{slideDestination}</span>
+                </p>
 
                 <Textarea value={slideForm.bodyText} onChange={(event) => setSlideForm((current) => ({ ...current, bodyText: event.target.value }))} placeholder="Slide body text" className="min-h-24 rounded-2xl" />
                 <label className="flex items-center gap-3 rounded-2xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 dark:border-zinc-700 dark:text-zinc-200">
