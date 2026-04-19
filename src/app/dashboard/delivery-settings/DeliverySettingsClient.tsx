@@ -24,6 +24,11 @@ interface DeliverySettingsClientProps {
     initialSettings: DeliverySettingsFormValues
 }
 
+function parseNumericInput(value: string) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : 0
+}
+
 function buildFormData(settings: DeliverySettingsFormValues) {
     const formData = new FormData()
 
@@ -51,9 +56,36 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
         Math.max(0, settings.baseFareNaira) + Math.max(0, sampleDistanceKm) * Math.max(0, settings.distanceRateNairaPerKm)
     )
     const sampleRiderPayoutKobo = Math.round(sampleFeeKobo * (Math.max(0, settings.riderSharePercent) / 100))
-    const sampleCorporateShareKobo = Math.max(0, sampleFeeKobo - sampleRiderPayoutKobo)
+    const sampleCorporateShareKobo = Math.round(
+        sampleFeeKobo * (Math.max(0, settings.corporateDeliverySharePercent) / 100)
+    )
 
     function handleSave() {
+        if (!settings.originState.trim()) {
+            toast.error("Origin state is required.")
+            return
+        }
+
+        if (
+            !Number.isFinite(settings.baseFareNaira)
+            || !Number.isFinite(settings.distanceRateNairaPerKm)
+            || !Number.isFinite(settings.originLat)
+            || !Number.isFinite(settings.originLng)
+        ) {
+            toast.error("Enter valid numbers for the fare, rate, and origin coordinates.")
+            return
+        }
+
+        if (settings.baseFareNaira < 0 || settings.distanceRateNairaPerKm < 0) {
+            toast.error("Base fare and distance rate cannot be negative.")
+            return
+        }
+
+        if (settings.originLat < -90 || settings.originLat > 90 || settings.originLng < -180 || settings.originLng > 180) {
+            toast.error("Origin latitude or longitude is outside valid geographic bounds.")
+            return
+        }
+
         if (shareTotalBps !== 10_000) {
             toast.error("Rider and corporate shares must add up to 100%.")
             return
@@ -161,7 +193,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             min="0"
                             step="0.1"
                             value={sampleDistanceKm}
-                            onChange={(event) => setSampleDistanceKm(Number(event.target.value) || 0)}
+                            onChange={(event) => setSampleDistanceKm(parseNumericInput(event.target.value))}
                             className="h-12 w-full rounded-xl bg-white dark:bg-zinc-900 lg:w-40"
                         />
                     </label>
@@ -199,7 +231,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             min="0"
                             step="0.01"
                             value={settings.baseFareNaira}
-                            onChange={(event) => setSettings((current) => ({ ...current, baseFareNaira: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, baseFareNaira: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>
@@ -211,7 +243,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             min="0"
                             step="0.01"
                             value={settings.distanceRateNairaPerKm}
-                            onChange={(event) => setSettings((current) => ({ ...current, distanceRateNairaPerKm: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, distanceRateNairaPerKm: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>
@@ -231,7 +263,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             type="number"
                             step="0.000001"
                             value={settings.originLat}
-                            onChange={(event) => setSettings((current) => ({ ...current, originLat: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, originLat: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>
@@ -242,7 +274,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             type="number"
                             step="0.000001"
                             value={settings.originLng}
-                            onChange={(event) => setSettings((current) => ({ ...current, originLng: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, originLng: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>
@@ -267,7 +299,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             max="100"
                             step="0.01"
                             value={settings.riderSharePercent}
-                            onChange={(event) => setSettings((current) => ({ ...current, riderSharePercent: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, riderSharePercent: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>
@@ -280,7 +312,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             max="100"
                             step="0.01"
                             value={settings.corporateDeliverySharePercent}
-                            onChange={(event) => setSettings((current) => ({ ...current, corporateDeliverySharePercent: Number(event.target.value) || 0 }))}
+                            onChange={(event) => setSettings((current) => ({ ...current, corporateDeliverySharePercent: parseNumericInput(event.target.value) }))}
                             className="h-12 rounded-xl bg-gray-50 dark:bg-zinc-800/50"
                         />
                     </label>

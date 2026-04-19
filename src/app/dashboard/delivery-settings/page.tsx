@@ -13,6 +13,16 @@ const DEFAULT_DELIVERY_SETTINGS = {
     originState: "Lagos",
 }
 
+function safeNumber(value: unknown, fallback: number) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function safeString(value: unknown, fallback: string) {
+    const parsed = typeof value === "string" ? value.trim() : ""
+    return parsed || fallback
+}
+
 export default async function DeliverySettingsPage() {
     await requireAdminRouteAccess("delivery_settings")
 
@@ -29,16 +39,16 @@ export default async function DeliverySettingsPage() {
             : {}
 
     const initialSettings: DeliverySettingsFormValues = {
-        baseFareNaira: koboToNaira(Number(value.base_fare_kobo ?? DEFAULT_DELIVERY_SETTINGS.baseFareKobo)),
+        baseFareNaira: koboToNaira(safeNumber(value.base_fare_kobo, DEFAULT_DELIVERY_SETTINGS.baseFareKobo)),
         distanceRateNairaPerKm: koboToNaira(
-            Number(value.distance_rate_kobo_per_km ?? DEFAULT_DELIVERY_SETTINGS.distanceRateKoboPerKm)
+            safeNumber(value.distance_rate_kobo_per_km, DEFAULT_DELIVERY_SETTINGS.distanceRateKoboPerKm)
         ),
-        riderSharePercent: Number(value.rider_share_bps ?? DEFAULT_DELIVERY_SETTINGS.riderShareBps) / 100,
+        riderSharePercent: safeNumber(value.rider_share_bps, DEFAULT_DELIVERY_SETTINGS.riderShareBps) / 100,
         corporateDeliverySharePercent:
-            Number(value.corporate_delivery_share_bps ?? DEFAULT_DELIVERY_SETTINGS.corporateDeliveryShareBps) / 100,
-        originLat: Number(value.origin_lat ?? DEFAULT_DELIVERY_SETTINGS.originLat),
-        originLng: Number(value.origin_lng ?? DEFAULT_DELIVERY_SETTINGS.originLng),
-        originState: String(value.origin_state ?? DEFAULT_DELIVERY_SETTINGS.originState),
+            safeNumber(value.corporate_delivery_share_bps, DEFAULT_DELIVERY_SETTINGS.corporateDeliveryShareBps) / 100,
+        originLat: safeNumber(value.origin_lat, DEFAULT_DELIVERY_SETTINGS.originLat),
+        originLng: safeNumber(value.origin_lng, DEFAULT_DELIVERY_SETTINGS.originLng),
+        originState: safeString(value.origin_state, DEFAULT_DELIVERY_SETTINGS.originState),
     }
 
     return <DeliverySettingsClient initialSettings={initialSettings} />

@@ -5,6 +5,26 @@ import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { AccountsDataTable } from "@/components/dashboard/accounts/accounts-data-table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
+type AccountRole = "supa_admin" | "sub_admin" | "admin" | "merchant" | "agent" | "rider" | "customer"
+
+function getPrimaryAccountRole(options: {
+    hasAgentProfile: boolean
+    hasMerchantProfile: boolean
+    hasRiderProfile: boolean
+    roles: string[]
+}): AccountRole {
+    const uniqueRoles = Array.from(new Set(options.roles))
+
+    if (uniqueRoles.includes("supa_admin")) return "supa_admin"
+    if (uniqueRoles.includes("sub_admin")) return "sub_admin"
+    if (uniqueRoles.includes("admin")) return "admin"
+    if (uniqueRoles.includes("merchant") || options.hasMerchantProfile) return "merchant"
+    if (uniqueRoles.includes("agent") || options.hasAgentProfile) return "agent"
+    if (uniqueRoles.includes("rider") || options.hasRiderProfile) return "rider"
+
+    return "customer"
+}
+
 export default async function AccountsPage() {
     await requireAdminRouteAccess("accounts")
     const supabase = await createClient()
@@ -34,10 +54,13 @@ export default async function AccountsPage() {
 
     const profileIds = profiles?.map(p => p.id) || []
 
-    const rolesMap = new Map()
+    const rolesMap = new Map<string, string[]>()
     const riderStatusMap = new Map()
     const agentStatusMap = new Map()
     const merchantStatusMap = new Map()
+    const riderIds = new Set<string>()
+    const agentIds = new Set<string>()
+    const merchantIds = new Set<string>()
 
     if (profileIds.length > 0) {
         const [{ data: userRoles, error: rolesError }, { data: riderProfiles }, { data: agentProfiles }, { data: merchants }] = await Promise.all([
@@ -63,18 +86,35 @@ export default async function AccountsPage() {
             console.error("AccountsPage: Error fetching roles:", rolesError)
         }
 
-        userRoles?.forEach(ur => rolesMap.set(ur.user_id, ur.role))
-        riderProfiles?.forEach(profile => riderStatusMap.set(profile.id, profile.status))
-        agentProfiles?.forEach(profile => agentStatusMap.set(profile.id, profile.status))
-        merchants?.forEach(profile => merchantStatusMap.set(profile.id, profile.status))
+        userRoles?.forEach((userRole) => {
+            const existingRoles = rolesMap.get(userRole.user_id) ?? []
+            existingRoles.push(String(userRole.role ?? ""))
+            rolesMap.set(userRole.user_id, existingRoles)
+        })
+        riderProfiles?.forEach((profile) => {
+            riderIds.add(profile.id)
+            riderStatusMap.set(profile.id, profile.status)
+        })
+        agentProfiles?.forEach((profile) => {
+            agentIds.add(profile.id)
+            agentStatusMap.set(profile.id, profile.status)
+        })
+        merchants?.forEach((profile) => {
+            merchantIds.add(profile.id)
+            merchantStatusMap.set(profile.id, profile.status)
+        })
     }
 
     const users = profiles?.map(profile => {
         const riderStatus = riderStatusMap.get(profile.id) || null
         const agentStatus = agentStatusMap.get(profile.id) || null
         const merchantStatus = merchantStatusMap.get(profile.id) || null
-        const inferredRole = rolesMap.get(profile.id)
-            || (agentStatus ? "agent" : merchantStatus ? "merchant" : riderStatus ? "rider" : "customer")
+        const inferredRole = getPrimaryAccountRole({
+            hasAgentProfile: agentIds.has(profile.id),
+            hasMerchantProfile: merchantIds.has(profile.id),
+            hasRiderProfile: riderIds.has(profile.id),
+            roles: rolesMap.get(profile.id) ?? [],
+        })
 
         return {
             ...profile,
