@@ -38,7 +38,7 @@ export function LoginForm({
         try {
             setGoogleLoading(true)
             const supabase = createClient()
-            const redirectTo = buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback-fallback")
+            const redirectTo = buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback")
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {

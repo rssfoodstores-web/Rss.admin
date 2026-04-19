@@ -23,7 +23,6 @@ function isLocalHostName(hostname: string | null | undefined) {
 export function getConfiguredAdminSiteUrl() {
     return normalizeSiteUrl(process.env.NEXT_PUBLIC_ADMIN_SITE_URL)
         ?? normalizeSiteUrl(process.env.ADMIN_SITE_URL)
-        ?? normalizeSiteUrl(process.env.NEXT_PUBLIC_SITE_URL)
         ?? DEFAULT_ADMIN_SITE_URL
 }
 
@@ -54,7 +53,7 @@ export function getServerAdminSiteUrl(request?: Request) {
         return `${url.protocol}//${url.host}`
     }
 
-    return configuredSiteUrl || `${forwardedProto}://${host}`
+    return `${forwardedProto}://${host}`
 }
 
 export function buildAbsoluteUrl(baseUrl: string, pathname: string, params?: Record<string, string | null | undefined>) {
