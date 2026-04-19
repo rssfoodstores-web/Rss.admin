@@ -25,6 +25,32 @@ export function AuthCallbackFallbackClient({
 
     useEffect(() => {
         let cancelled = false
+        let timeoutId: number | null = null
+
+        const finalizeWithActiveSession = async () => {
+            const supabase = createClient()
+            const {
+                data: { session },
+            } = await supabase.auth.getSession()
+
+            if (!session) {
+                return false
+            }
+
+            if (cancelled) {
+                return true
+            }
+
+            setStatusMessage("Finalizing your admin session...")
+
+            window.location.assign(
+                buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback/finalize", {
+                    next: nextPath,
+                })
+            )
+
+            return true
+        }
 
         const completeAuth = async () => {
             if (!code) {
@@ -39,29 +65,40 @@ export function AuthCallbackFallbackClient({
 
             try {
                 const supabase = createClient()
-                const { error } = await supabase.auth.exchangeCodeForSession(code)
+                if (await finalizeWithActiveSession()) {
+                    return
+                }
 
-                if (error) {
+                const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+                    if (!session || cancelled) {
+                        return
+                    }
+
+                    setStatusMessage("Finalizing your admin session...")
+
+                    window.location.assign(
+                        buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback/finalize", {
+                            next: nextPath,
+                        })
+                    )
+                })
+
+                timeoutId = window.setTimeout(async () => {
+                    const resolved = await finalizeWithActiveSession()
+
+                    if (resolved || cancelled) {
+                        listener.subscription.unsubscribe()
+                        return
+                    }
+
+                    listener.subscription.unsubscribe()
                     window.location.assign(
                         buildAuthErrorUrl(
-                            error.message,
-                            "Admin sign-in could not be completed in the browser fallback flow."
+                            "PKCE code verifier not found in storage.",
+                            "Admin sign-in could not be completed because the browser did not retain the PKCE verifier for this login attempt."
                         )
                     )
-                    return
-                }
-
-                if (cancelled) {
-                    return
-                }
-
-                setStatusMessage("Finalizing your admin session...")
-
-                window.location.assign(
-                    buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback/finalize", {
-                        next: nextPath,
-                    })
-                )
+                }, 4000)
             } catch (error) {
                 console.error("Client auth callback fallback failed:", error)
                 window.location.assign(
@@ -77,6 +114,9 @@ export function AuthCallbackFallbackClient({
 
         return () => {
             cancelled = true
+            if (timeoutId) {
+                window.clearTimeout(timeoutId)
+            }
         }
     }, [code, nextPath])
 
