@@ -1,15 +1,20 @@
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import {
+    CheckCircle2,
+    Copy,
     ImageIcon,
     Loader2,
     MonitorPlay,
+    PencilLine,
+    PlusCircle,
     RotateCcw,
     Save,
     Sparkles,
     Trash2,
+    TriangleAlert,
 } from "lucide-react"
 import { toast } from "sonner"
 import { createAdminCookOffUploadSignature } from "@/app/actions/cookOffMediaActions"
@@ -138,6 +143,7 @@ function validateCarouselSlide(form: HeroSlideFormState) {
 
 export function HeroSectionAdminClient({ initialData }: { initialData: StorefrontHeroAdminDashboard }) {
     const router = useRouter()
+    const slideEditorRef = useRef<HTMLDivElement | null>(null)
     const [editingSlideId, setEditingSlideId] = useState<string | null>(initialData.slides[0]?.id ?? null)
     const [slideForm, setSlideForm] = useState<HeroSlideFormState>(() => buildSlideForm(initialData.slides[0] ?? null))
     const [defaultForm, setDefaultForm] = useState<StorefrontHeroDefaultDraft>(() => buildDefaultForm(initialData.defaultSlide))
@@ -148,6 +154,15 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
     const defaultUsesManagedDestination = isManagedStorefrontHeroMarketingMode(defaultForm.marketingMode)
     const slideDestination = resolveStorefrontHeroDestination(slideForm.marketingMode, slideForm.buttonUrl)
     const slideUsesManagedDestination = isManagedStorefrontHeroMarketingMode(slideForm.marketingMode)
+    const slideHasUploadedMedia = Boolean(slideForm.mediaPublicId.trim() && slideForm.mediaUrl.trim())
+    const selectedSlideTitle = initialData.slides.find((slide) => slide.id === editingSlideId)?.title?.trim() ?? ""
+    const activeCarouselSlides = initialData.slides.filter((slide) => slide.is_active).length
+
+    const focusSlideEditor = () => {
+        window.requestAnimationFrame(() => {
+            slideEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+        })
+    }
 
     async function uploadHeroAsset(file: File, mediaType: "image" | "video") {
         return uploadSignedCloudinaryAsset(
@@ -160,6 +175,24 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
     const selectSlide = (slide: HeroSlideRow | null) => {
         setEditingSlideId(slide?.id ?? null)
         setSlideForm(buildSlideForm(slide))
+        focusSlideEditor()
+    }
+
+    const startNewSlide = () => {
+        setEditingSlideId(null)
+        setSlideForm(buildSlideForm(null))
+        focusSlideEditor()
+    }
+
+    const duplicateSlide = (slide: HeroSlideRow) => {
+        setEditingSlideId(null)
+        setSlideForm({
+            ...buildSlideForm(slide),
+            sortOrder: (slide.sort_order ?? 0) + 1,
+            title: slide.title?.trim() ? `${slide.title} Copy` : "Slide Copy",
+        })
+        toast.success("Slide copied into the editor. Upload new media only if you want to replace the current file.")
+        focusSlideEditor()
     }
 
     async function handleDefaultMediaUpload(file: File) {
@@ -450,7 +483,47 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                             These slides override the default fallback whenever at least one active slide exists.
                         </p>
                     </div>
-                    <Button type="button" variant="outline" className="rounded-full" onClick={() => selectSlide(null)}>New slide</Button>
+                    <Button type="button" variant="outline" className="rounded-full" onClick={startNewSlide}>
+                        <PlusCircle className="mr-2 h-4 w-4" />
+                        New slide
+                    </Button>
+                </div>
+
+                <div className="rounded-[1.75rem] border border-orange-100 bg-orange-50/70 p-5 text-sm text-orange-950 dark:border-orange-900/40 dark:bg-orange-950/20 dark:text-orange-100">
+                    <p className="font-semibold">How to add a new carousel slide</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-4">
+                        <div className="rounded-2xl bg-white/80 p-3 dark:bg-black/20">
+                            <p className="font-semibold">1. Start a new slide</p>
+                            <p className="mt-1 text-xs leading-5 text-orange-900/80 dark:text-orange-100/80">Click <span className="font-semibold">New slide</span> to clear the form and open the slide editor below.</p>
+                        </div>
+                        <div className="rounded-2xl bg-white/80 p-3 dark:bg-black/20">
+                            <p className="font-semibold">2. Choose the media type</p>
+                            <p className="mt-1 text-xs leading-5 text-orange-900/80 dark:text-orange-100/80">Pick <span className="font-semibold">Image</span> or <span className="font-semibold">Video</span> before uploading.</p>
+                        </div>
+                        <div className="rounded-2xl bg-white/80 p-3 dark:bg-black/20">
+                            <p className="font-semibold">3. Upload the file</p>
+                            <p className="mt-1 text-xs leading-5 text-orange-900/80 dark:text-orange-100/80">Use the <span className="font-semibold">Media upload</span> field in the editor. The media URL will fill in automatically after upload.</p>
+                        </div>
+                        <div className="rounded-2xl bg-white/80 p-3 dark:bg-black/20">
+                            <p className="font-semibold">4. Save the slide</p>
+                            <p className="mt-1 text-xs leading-5 text-orange-900/80 dark:text-orange-100/80">Add the text fields you want, keep the slide active, then click <span className="font-semibold">Save carousel slide</span>.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div className={`rounded-[1.75rem] border p-5 text-sm ${
+                    activeCarouselSlides >= 2
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-100"
+                        : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100"
+                }`}>
+                    <p className="font-semibold">
+                        {activeCarouselSlides >= 2 ? "Carousel rotation is ready" : "Carousel rotation needs more than one active slide"}
+                    </p>
+                    <p className="mt-2 leading-6">
+                        {activeCarouselSlides >= 2
+                            ? `You currently have ${activeCarouselSlides} active slides, so the storefront hero can rotate through them like a carousel.`
+                            : `You currently have ${activeCarouselSlides} active slide${activeCarouselSlides === 1 ? "" : "s"}. The storefront will still show the hero, but rotation starts only when at least 2 slides are active.`}
+                    </p>
                 </div>
 
                 <div className="grid gap-3">
@@ -471,6 +544,10 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="button" variant="outline" className="rounded-full" onClick={() => selectSlide(slide)}>Edit</Button>
+                                    <Button type="button" variant="outline" className="rounded-full" onClick={() => duplicateSlide(slide)}>
+                                        <Copy className="mr-2 h-4 w-4" />
+                                        Duplicate
+                                    </Button>
                                     <Button type="button" variant="outline" className="rounded-full border-red-200 text-red-600 hover:bg-red-50" onClick={() => void handleDeleteSlide(slide.id)}>
                                         <Trash2 className="mr-2 h-4 w-4" />
                                         Delete
@@ -479,6 +556,53 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
                             </div>
                         ))
                     )}
+                </div>
+
+                <div ref={slideEditorRef} className="rounded-[1.75rem] border border-gray-100 bg-gray-50/70 p-5 dark:border-zinc-800 dark:bg-zinc-950/30">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Badge className={editingSlideId ? "border-blue-200 bg-blue-50 text-blue-700" : "border-emerald-200 bg-emerald-50 text-emerald-700"}>
+                                    {editingSlideId ? "Editing existing slide" : "Creating new slide"}
+                                </Badge>
+                                {editingSlideId ? <PencilLine className="h-4 w-4 text-blue-600" /> : <PlusCircle className="h-4 w-4 text-emerald-600" />}
+                            </div>
+                            <h3 className="mt-3 text-lg font-bold text-gray-900 dark:text-white">
+                                {editingSlideId ? `Editing: ${selectedSlideTitle || "Untitled slide"}` : "New carousel slide"}
+                            </h3>
+                            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                                {editingSlideId
+                                    ? "Update the fields below, upload replacement media if needed, then save your changes."
+                                    : "Fill in the fields below, upload the slide media, and save to add a new carousel item."}
+                            </p>
+                        </div>
+                        <Button type="button" variant="outline" className="rounded-full" onClick={startNewSlide}>
+                            <PlusCircle className="mr-2 h-4 w-4" />
+                            Clear for new slide
+                        </Button>
+                    </div>
+
+                    <div className={`mt-4 flex items-start gap-3 rounded-2xl border px-4 py-3 text-sm ${
+                        slideHasUploadedMedia
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-200"
+                            : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-100"
+                    }`}>
+                        {slideHasUploadedMedia ? (
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                        ) : (
+                            <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                        )}
+                        <div>
+                            <p className="font-semibold">
+                                {slideHasUploadedMedia ? "Media uploaded and ready" : "Media still needed"}
+                            </p>
+                            <p className="mt-1 leading-5">
+                                {slideHasUploadedMedia
+                                    ? "This slide already has uploaded media attached. You can save it now or replace the file with another upload."
+                                    : "After choosing Image or Video, use the Media upload field below. Saving will stay blocked until a file has been uploaded successfully."}
+                            </p>
+                        </div>
+                    </div>
                 </div>
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -617,7 +741,7 @@ export function HeroSectionAdminClient({ initialData }: { initialData: Storefron
 
                 <Button type="button" onClick={() => void saveSlide()} disabled={savingSlide} className="rounded-full bg-[#F58220] hover:bg-[#d86a12]">
                     {savingSlide ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-                    Save carousel slide
+                    {editingSlideId ? "Save carousel changes" : "Save carousel slide"}
                 </Button>
             </section>
         </div>
