@@ -1,11 +1,16 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Loader2, Search, Send, Users, UserRound } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { Filter, Loader2, Send, Users, UserRound } from "lucide-react"
 import { sendUserMessage } from "@/actions/notifications"
-import type { NotificationHistoryItem } from "@/lib/admin-notifications"
+import type {
+    NotificationHistoryItem,
+    NotificationRecipientDirectoryItem,
+    NotificationRecipientRole,
+    NotificationRoleSummary,
+} from "@/lib/admin-notifications"
+import { getNotificationRoleLabel } from "@/lib/admin-notifications"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,15 +19,10 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { useToast } from "@/hooks/use-toast"
 
-interface RecipientSearchResult {
-    company_name: string | null
-    full_name: string | null
-    id: string
-    phone: string | null
-}
-
 interface NotificationsPageClientProps {
     initialHistory: NotificationHistoryItem[]
+    recipientDirectory: NotificationRecipientDirectoryItem[]
+    roleSummaries: NotificationRoleSummary[]
     totalRecipients: number
 }
 
@@ -33,7 +33,7 @@ function formatDate(value: string) {
     }).format(new Date(value))
 }
 
-function getRecipientLabel(user: RecipientSearchResult | null) {
+function getRecipientLabel(user: NotificationRecipientDirectoryItem | null) {
     if (!user) {
         return "Selected user"
     }
@@ -44,102 +44,80 @@ function getRecipientLabel(user: RecipientSearchResult | null) {
         || user.id.slice(0, 8)
 }
 
-export function NotificationsPageClient({ initialHistory, totalRecipients }: NotificationsPageClientProps) {
+function getRecipientMeta(user: NotificationRecipientDirectoryItem) {
+    return user.phone?.trim()
+        || user.company_name?.trim()
+        || user.id
+}
+
+function normalizeSearchValue(value: string) {
+    return value.trim().toLowerCase()
+}
+
+export function NotificationsPageClient({
+    initialHistory,
+    recipientDirectory,
+    roleSummaries,
+    totalRecipients,
+}: NotificationsPageClientProps) {
     const searchParams = useSearchParams()
     const urlUserId = searchParams.get("userId")
     const { toast } = useToast()
-    const [supabase] = useState(() => createClient())
+    const preselectedUser = recipientDirectory.find((recipient) => recipient.id === urlUserId) ?? null
     const [history, setHistory] = useState(initialHistory)
     const [loading, setLoading] = useState(false)
-    const [searchLoading, setSearchLoading] = useState(false)
-    const [audience, setAudience] = useState<"single" | "all">("single")
-    const [selectedUser, setSelectedUser] = useState<RecipientSearchResult | null>(null)
+    const [audience, setAudience] = useState<"single" | "all" | "role">(preselectedUser ? "single" : "single")
+    const [selectedUser, setSelectedUser] = useState<NotificationRecipientDirectoryItem | null>(preselectedUser)
+    const [pickerRoleFilter, setPickerRoleFilter] = useState<NotificationRecipientRole | "all">("all")
+    const [targetRole, setTargetRole] = useState<NotificationRecipientRole | "customer">("rider")
     const [searchQuery, setSearchQuery] = useState("")
-    const [searchResults, setSearchResults] = useState<RecipientSearchResult[]>([])
     const [title, setTitle] = useState("")
     const [message, setMessage] = useState("")
     const [actionUrl, setActionUrl] = useState("")
 
-    useEffect(() => {
-        if (!urlUserId) {
-            return
-        }
+    const filteredRecipients = useMemo(() => {
+        const normalizedQuery = normalizeSearchValue(searchQuery)
 
-        let active = true
+        return recipientDirectory
+            .filter((recipient) => pickerRoleFilter === "all" || recipient.roles.includes(pickerRoleFilter))
+            .filter((recipient) => {
+                if (!normalizedQuery) {
+                    return true
+                }
 
-        async function loadUser() {
-            setSearchLoading(true)
-            const { data, error } = await supabase
-                .from("profiles")
-                .select("id, full_name, company_name, phone")
-                .eq("id", urlUserId)
-                .maybeSingle()
+                const haystack = [
+                    recipient.full_name,
+                    recipient.company_name,
+                    recipient.phone,
+                    recipient.id,
+                    recipient.roles.join(" "),
+                ]
+                    .filter(Boolean)
+                    .join(" ")
+                    .toLowerCase()
 
-            if (!active) {
-                return
-            }
+                return haystack.includes(normalizedQuery)
+            })
+    }, [pickerRoleFilter, recipientDirectory, searchQuery])
 
-            if (error) {
-                toast({
-                    title: "Lookup failed",
-                    description: error.message,
-                    variant: "destructive",
-                })
-            } else if (data) {
-                setAudience("single")
-                setSelectedUser(data)
-            }
+    const visibleRecipients = useMemo(() => filteredRecipients.slice(0, 12), [filteredRecipients])
 
-            setSearchLoading(false)
-        }
-
-        void loadUser()
-
-        return () => {
-            active = false
-        }
-    }, [supabase, toast, urlUserId])
+    const selectedRoleSummary = useMemo(
+        () => roleSummaries.find((summary) => summary.role === targetRole) ?? null,
+        [roleSummaries, targetRole]
+    )
 
     const audienceSummary = useMemo(() => {
         if (audience === "all") {
             return `Broadcast to all ${totalRecipients.toLocaleString()} account${totalRecipients === 1 ? "" : "s"}`
         }
 
-        return selectedUser ? `Direct notification to ${getRecipientLabel(selectedUser)}` : "Choose one user"
-    }, [audience, selectedUser, totalRecipients])
-
-    async function handleSearch(event: React.FormEvent) {
-        event.preventDefault()
-        const query = searchQuery.trim()
-
-        if (!query) {
-            setSearchResults([])
-            return
+        if (audience === "role") {
+            return `Notify all ${getNotificationRoleLabel(targetRole).toLowerCase()}`
         }
 
-        setSearchLoading(true)
-
-        const sanitizedQuery = query.replace(/[%_,]/g, " ")
-        const { data, error } = await supabase
-            .from("profiles")
-            .select("id, full_name, company_name, phone")
-            .or(`full_name.ilike.%${sanitizedQuery}%,company_name.ilike.%${sanitizedQuery}%,phone.ilike.%${sanitizedQuery}%`)
-            .order("updated_at", { ascending: false })
-            .limit(8)
-
-        if (error) {
-            toast({
-                title: "Search failed",
-                description: error.message,
-                variant: "destructive",
-            })
-            setSearchResults([])
-        } else {
-            setSearchResults((data ?? []) as RecipientSearchResult[])
-        }
-
-        setSearchLoading(false)
-    }
+        return selectedUser ? `Direct notification to ${getRecipientLabel(selectedUser)}` : "Choose one existing user"
+    }, [audience, selectedUser, targetRole, totalRecipients])
 
     async function handleSend(event: React.FormEvent) {
         event.preventDefault()
@@ -147,7 +125,16 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
         if (audience === "single" && !selectedUser) {
             toast({
                 title: "Recipient required",
-                description: "Select a user before sending.",
+                description: "Select an existing user before sending.",
+                variant: "destructive",
+            })
+            return
+        }
+
+        if (audience === "role" && !targetRole) {
+            toast({
+                title: "Role required",
+                description: "Choose which role should receive this notification.",
                 variant: "destructive",
             })
             return
@@ -160,6 +147,9 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
         if (selectedUser) {
             formData.append("userId", selectedUser.id)
         }
+        if (audience === "role") {
+            formData.append("targetRole", targetRole)
+        }
         formData.append("title", title)
         formData.append("message", message)
         formData.append("action_url", actionUrl)
@@ -171,7 +161,9 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
                 title: "Notification sent",
                 description: audience === "all"
                     ? `Broadcast delivered to ${result.sentCount ?? totalRecipients} users.`
-                    : `Notification sent to ${getRecipientLabel(selectedUser)}.`,
+                    : audience === "role"
+                        ? `Notification delivered to ${result.sentCount ?? 0} ${getNotificationRoleLabel(targetRole).toLowerCase()}.`
+                        : `Notification sent to ${getRecipientLabel(selectedUser)}.`,
             })
 
             if (result.historyEntry) {
@@ -183,7 +175,6 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
             setActionUrl("")
             if (audience === "single") {
                 setSearchQuery("")
-                setSearchResults([])
             }
         } else {
             toast({
@@ -200,7 +191,7 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">Notifications Center</h1>
-                <p className="text-muted-foreground">Send direct notifications to one user or broadcast an announcement to every account.</p>
+                <p className="text-muted-foreground">Send to one existing user, a full role group, or every account in the system.</p>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
@@ -221,20 +212,22 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
                 <Card>
                     <CardContent className="p-5">
                         <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Mode</div>
-                        <div className="mt-3 text-3xl font-bold">{audience === "all" ? "Broadcast" : "Direct"}</div>
+                        <div className="mt-3 text-3xl font-bold">
+                            {audience === "all" ? "Broadcast" : audience === "role" ? "Role group" : "Direct"}
+                        </div>
                         <div className="mt-1 text-sm text-muted-foreground">{audienceSummary}</div>
                     </CardContent>
                 </Card>
             </div>
 
-            <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
+            <div className="grid gap-6 xl:grid-cols-[1.15fr_1fr]">
                 <Card>
                     <CardHeader>
                         <CardTitle>Audience</CardTitle>
-                        <CardDescription>Choose a single recipient or notify everybody at once.</CardDescription>
+                        <CardDescription>Pick one user, target a whole role, or send to everybody.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-5">
-                        <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="grid gap-3 lg:grid-cols-3">
                             <button
                                 type="button"
                                 onClick={() => setAudience("single")}
@@ -244,15 +237,27 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
                                     <UserRound className="h-4 w-4" />
                                     Specific user
                                 </div>
-                                <div className="mt-2 text-sm text-muted-foreground">Search by name, company, or phone and send one message.</div>
+                                <div className="mt-2 text-sm text-muted-foreground">Choose from existing users and send a direct notification.</div>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setAudience("role")
+                                    setSelectedUser(null)
+                                }}
+                                className={`rounded-2xl border p-4 text-left transition ${audience === "role" ? "border-orange-500 bg-orange-50 dark:bg-orange-950/20" : "border-border bg-card"}`}
+                            >
+                                <div className="flex items-center gap-2 font-semibold">
+                                    <Filter className="h-4 w-4" />
+                                    Role group
+                                </div>
+                                <div className="mt-2 text-sm text-muted-foreground">Notify everyone with a role like riders, merchants, or agents.</div>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => {
                                     setAudience("all")
                                     setSelectedUser(null)
-                                    setSearchResults([])
-                                    setSearchQuery("")
                                 }}
                                 className={`rounded-2xl border p-4 text-left transition ${audience === "all" ? "border-orange-500 bg-orange-50 dark:bg-orange-950/20" : "border-border bg-card"}`}
                             >
@@ -266,64 +271,134 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
 
                         {audience === "single" ? (
                             <div className="space-y-4">
-                                <form onSubmit={handleSearch} className="flex gap-2">
-                                    <Input
-                                        placeholder="Search by name, phone, or company..."
-                                        value={searchQuery}
-                                        onChange={(event) => setSearchQuery(event.target.value)}
-                                    />
-                                    <Button type="submit" variant="secondary" disabled={searchLoading}>
-                                        {searchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                                    </Button>
-                                </form>
+                                <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="recipient-search">Find an existing user</Label>
+                                        <Input
+                                            id="recipient-search"
+                                            placeholder="Search by name, company, phone, or ID..."
+                                            value={searchQuery}
+                                            onChange={(event) => setSearchQuery(event.target.value)}
+                                        />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="recipient-role-filter">Filter user list by role</Label>
+                                        <select
+                                            id="recipient-role-filter"
+                                            value={pickerRoleFilter}
+                                            onChange={(event) => setPickerRoleFilter(event.target.value as NotificationRecipientRole | "all")}
+                                            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                        >
+                                            <option value="all">All roles</option>
+                                            {roleSummaries.map((summary) => (
+                                                <option key={summary.role} value={summary.role}>
+                                                    {summary.label}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
 
-                                {searchResults.length > 0 && !selectedUser ? (
-                                    <div className="max-h-[260px] divide-y overflow-y-auto rounded-2xl border">
-                                        {searchResults.map((user) => (
+                                <div className="rounded-2xl border">
+                                    <div className="border-b px-4 py-3 text-sm text-muted-foreground">
+                                        {filteredRecipients.length === 0
+                                            ? "No users match the current search."
+                                            : `Showing ${Math.min(visibleRecipients.length, filteredRecipients.length)} of ${filteredRecipients.length} matching users.`}
+                                    </div>
+                                    <div className="max-h-[320px] divide-y overflow-y-auto">
+                                        {visibleRecipients.length > 0 ? visibleRecipients.map((user) => (
                                             <button
                                                 key={user.id}
                                                 type="button"
-                                                className="flex w-full items-center justify-between gap-3 p-4 text-left hover:bg-muted"
-                                                onClick={() => {
-                                                    setSelectedUser(user)
-                                                    setSearchQuery("")
-                                                    setSearchResults([])
-                                                }}
+                                                className={`flex w-full items-start justify-between gap-3 p-4 text-left hover:bg-muted ${selectedUser?.id === user.id ? "bg-orange-50 dark:bg-orange-950/20" : ""}`}
+                                                onClick={() => setSelectedUser(user)}
                                             >
-                                                <div>
+                                                <div className="space-y-1">
                                                     <div className="font-medium">{getRecipientLabel(user)}</div>
-                                                    <div className="text-sm text-muted-foreground">{user.phone || user.company_name || user.id}</div>
+                                                    <div className="text-sm text-muted-foreground">{getRecipientMeta(user)}</div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {user.roles.map((role) => (
+                                                            <Badge key={`${user.id}-${role}`} variant="outline">{getNotificationRoleLabel(role)}</Badge>
+                                                        ))}
+                                                    </div>
                                                 </div>
-                                                <Badge variant="outline">Select</Badge>
+                                                <Badge variant={selectedUser?.id === user.id ? "default" : "outline"}>
+                                                    {selectedUser?.id === user.id ? "Selected" : "Select"}
+                                                </Badge>
                                             </button>
-                                        ))}
+                                        )) : (
+                                            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                                                No users available for the current filter.
+                                            </div>
+                                        )}
                                     </div>
-                                ) : null}
+                                </div>
 
                                 {selectedUser ? (
                                     <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 dark:border-orange-900 dark:bg-orange-950/20">
                                         <div className="mb-2 flex items-start justify-between gap-3">
                                             <div>
                                                 <div className="font-semibold">{getRecipientLabel(selectedUser)}</div>
-                                                <div className="text-sm text-muted-foreground">{selectedUser.phone || selectedUser.company_name || selectedUser.id}</div>
+                                                <div className="text-sm text-muted-foreground">{getRecipientMeta(selectedUser)}</div>
                                             </div>
                                             <Button variant="ghost" size="sm" className="h-auto px-2 py-1" onClick={() => setSelectedUser(null)}>
-                                                Change
+                                                Clear
                                             </Button>
                                         </div>
-                                        <div className="text-xs text-muted-foreground">Recipient ID {selectedUser.id}</div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {selectedUser.roles.map((role) => (
+                                                <Badge key={`selected-${role}`} variant="outline">{getNotificationRoleLabel(role)}</Badge>
+                                            ))}
+                                        </div>
                                     </div>
-                                ) : (
-                                    <div className="rounded-2xl border border-dashed py-8 text-center text-sm text-muted-foreground">
-                                        {searchLoading ? "Looking up user..." : "No user selected yet."}
-                                    </div>
-                                )}
+                                ) : null}
                             </div>
-                        ) : (
+                        ) : null}
+
+                        {audience === "role" ? (
+                            <div className="space-y-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="target-role">Send to users by role</Label>
+                                    <select
+                                        id="target-role"
+                                        value={targetRole}
+                                        onChange={(event) => setTargetRole(event.target.value as NotificationRecipientRole)}
+                                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                                    >
+                                        {roleSummaries.map((summary) => (
+                                            <option key={summary.role} value={summary.role}>
+                                                {summary.label}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                                    {roleSummaries.map((summary) => (
+                                        <button
+                                            key={summary.role}
+                                            type="button"
+                                            onClick={() => setTargetRole(summary.role)}
+                                            className={`rounded-2xl border p-4 text-left transition ${targetRole === summary.role ? "border-orange-500 bg-orange-50 dark:bg-orange-950/20" : "border-border bg-card"}`}
+                                        >
+                                            <div className="font-semibold">{summary.label}</div>
+                                            <div className="mt-1 text-sm text-muted-foreground">
+                                                {summary.count.toLocaleString()} matching profile{summary.count === 1 ? "" : "s"}
+                                            </div>
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm text-muted-foreground dark:border-orange-900 dark:bg-orange-950/20">
+                                    This will send one notification to every user whose role includes <span className="font-semibold text-foreground">{getNotificationRoleLabel(targetRole)}</span>.
+                                    {selectedRoleSummary ? ` Current match count: ${selectedRoleSummary.count.toLocaleString()}.` : ""}
+                                </div>
+                            </div>
+                        ) : null}
+
+                        {audience === "all" ? (
                             <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm text-muted-foreground dark:border-orange-900 dark:bg-orange-950/20">
                                 This will broadcast the same notification to all {totalRecipients.toLocaleString()} profiles currently stored in the system.
                             </div>
-                        )}
+                        ) : null}
                     </CardContent>
                 </Card>
 
@@ -359,9 +434,13 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
                                 />
                                 <p className="text-xs text-muted-foreground">Optional. If provided, clicking the notification can open this path or URL.</p>
                             </div>
-                            <Button type="submit" className="w-full bg-orange-500 text-white hover:bg-orange-600" disabled={loading || (audience === "single" && !selectedUser)}>
+                            <Button
+                                type="submit"
+                                className="w-full bg-orange-500 text-white hover:bg-orange-600"
+                                disabled={loading || (audience === "single" && !selectedUser)}
+                            >
                                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                                {audience === "all" ? "Broadcast notification" : "Send notification"}
+                                {audience === "all" ? "Broadcast notification" : audience === "role" ? `Send to ${getNotificationRoleLabel(targetRole)}` : "Send notification"}
                             </Button>
                         </form>
                     </CardContent>
@@ -386,7 +465,10 @@ export function NotificationsPageClient({ initialHistory, totalRecipients }: Not
                                         <div className="space-y-2">
                                             <div className="flex flex-wrap items-center gap-2">
                                                 <div className="font-semibold">{item.title}</div>
-                                                <Badge variant="outline">{item.audience === "all" ? "Broadcast" : "Direct"}</Badge>
+                                                <Badge variant="outline">
+                                                    {item.audience === "all" ? "Broadcast" : item.audience === "role" ? "Role group" : "Direct"}
+                                                </Badge>
+                                                {item.targetRole ? <Badge variant="outline">{getNotificationRoleLabel(item.targetRole)}</Badge> : null}
                                                 <Badge variant="outline">{item.recipientCount} recipient{item.recipientCount === 1 ? "" : "s"}</Badge>
                                                 {item.unreadCount > 0 ? <Badge variant="outline">{item.unreadCount} unread</Badge> : null}
                                             </div>
