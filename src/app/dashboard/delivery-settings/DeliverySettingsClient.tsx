@@ -62,7 +62,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
 
     function handleSave() {
         if (!settings.originState.trim()) {
-            toast.error("Origin state is required.")
+            toast.error("Fallback origin state is required.")
             return
         }
 
@@ -82,7 +82,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
         }
 
         if (settings.originLat < -90 || settings.originLat > 90 || settings.originLng < -180 || settings.originLng > 180) {
-            toast.error("Origin latitude or longitude is outside valid geographic bounds.")
+            toast.error("Fallback latitude or longitude is outside valid geographic bounds.")
             return
         }
 
@@ -145,7 +145,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                     <p className="mt-4 text-3xl font-bold text-gray-900 dark:text-white">
                         {formatKobo(nairaToKobo(settings.distanceRateNairaPerKm))}
                     </p>
-                    <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">Applied per kilometer from the configured origin point.</p>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">Applied per kilometer from the merchant pickup point.</p>
                 </div>
 
                 <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -162,11 +162,11 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                 <div className="rounded-3xl border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
                     <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-zinc-400">
                         <MapPinned className="h-4 w-4" />
-                        <span>Origin point</span>
+                        <span>Fallback origin</span>
                     </div>
                     <p className="mt-4 text-2xl font-bold text-gray-900 dark:text-white">{settings.originState || "Origin required"}</p>
                     <p className="mt-2 text-sm text-gray-500 dark:text-zinc-400">
-                        {settings.originLat.toFixed(4)}, {settings.originLng.toFixed(4)}
+                        Legacy reference: {settings.originLat.toFixed(4)}, {settings.originLng.toFixed(4)}
                     </p>
                 </div>
             </div>
@@ -179,10 +179,10 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                             <span>Formula preview</span>
                         </div>
                         <p className="mt-2 text-lg font-bold text-gray-900 dark:text-white">
-                            Customer fee = base fare + (distance x rate per km)
+                            Customer fee = base fare + (merchant-to-customer distance x rate per km)
                         </p>
                         <p className="mt-2 max-w-3xl text-sm text-gray-600 dark:text-zinc-300">
-                            Current storefront logic measures from this fixed origin to the customer&apos;s saved location. It does not use the merchant-to-customer route yet.
+                            Current storefront logic measures from the ordered merchant&apos;s saved pickup location to the customer&apos;s saved delivery location.
                         </p>
                     </div>
 
@@ -249,7 +249,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Origin state</span>
+                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Fallback origin state</span>
                         <Input
                             value={settings.originState}
                             onChange={(event) => setSettings((current) => ({ ...current, originState: event.target.value }))}
@@ -258,7 +258,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Origin latitude</span>
+                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Fallback latitude</span>
                         <Input
                             type="number"
                             step="0.000001"
@@ -269,7 +269,7 @@ export function DeliverySettingsClient({ initialSettings }: DeliverySettingsClie
                     </label>
 
                     <label className="space-y-2">
-                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Origin longitude</span>
+                        <span className="text-sm font-semibold text-gray-700 dark:text-zinc-200">Fallback longitude</span>
                         <Input
                             type="number"
                             step="0.000001"

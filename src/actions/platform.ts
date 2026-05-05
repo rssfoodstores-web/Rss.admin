@@ -120,11 +120,11 @@ export async function updateDeliverySettings(formData: FormData) {
     }
 
     if (originLat < -90 || originLat > 90 || originLng < -180 || originLng > 180) {
-        return { error: "Origin latitude or longitude is outside valid geographic bounds." }
+        return { error: "Fallback latitude or longitude is outside valid geographic bounds." }
     }
 
     if (!originState) {
-        return { error: "Origin state is required." }
+        return { error: "Fallback origin state is required." }
     }
 
     const riderShareBps = Math.round(riderSharePercent * 100)
