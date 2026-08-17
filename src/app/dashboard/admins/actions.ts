@@ -259,6 +259,7 @@ export async function saveAdminAccess(input: SaveAdminAccessInput): Promise<Admi
 
     revalidatePath("/dashboard/admins")
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard")
     return { success: true }
 }

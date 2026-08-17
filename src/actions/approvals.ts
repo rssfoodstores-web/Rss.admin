@@ -282,6 +282,7 @@ export async function approveRider(id: string) {
     revalidatePath("/dashboard/approvals")
     revalidatePath(`/dashboard/users/${id}`)
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -316,6 +317,7 @@ export async function rejectRider(id: string) {
     revalidatePath("/dashboard/approvals")
     revalidatePath(`/dashboard/users/${id}`)
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -352,6 +354,7 @@ export async function approveMerchant(id: string) {
 
     revalidatePath("/dashboard/approvals")
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -388,6 +391,7 @@ export async function rejectMerchant(id: string) {
 
     revalidatePath("/dashboard/approvals")
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -425,6 +429,7 @@ export async function approveAgent(id: string) {
     revalidatePath("/dashboard/approvals")
     revalidatePath(`/dashboard/users/${id}`)
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -462,6 +467,7 @@ export async function rejectAgent(id: string) {
     revalidatePath("/dashboard/approvals")
     revalidatePath(`/dashboard/users/${id}`)
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }

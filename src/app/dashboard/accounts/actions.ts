@@ -16,6 +16,7 @@ export const MANUAL_ACCOUNT_ROLES = [
 export type ManualAccountRole = (typeof MANUAL_ACCOUNT_ROLES)[number]
 
 interface CreateManualAccountInput {
+    grantAccountInfoPageAccess?: boolean
     email: string
     fullName?: string
     grantAccountsPageAccess?: boolean
@@ -87,7 +88,16 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
     }
 
     const fullName = input.fullName?.trim() || getFallbackName(email)
-    const adminSupabase = createAdminClient()
+    let adminSupabase: ReturnType<typeof createAdminClient>
+
+    try {
+        adminSupabase = createAdminClient()
+    } catch (error) {
+        return {
+            error: error instanceof Error ? error.message : "Supabase admin credentials are not configured.",
+        }
+    }
+
     const { data: created, error: createError } = await adminSupabase.auth.admin.createUser({
         email,
         email_confirm: true,
@@ -134,14 +144,21 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
         return { error: roleError.message }
     }
 
-    if (requestedRole === "sub_admin" && input.grantAccountsPageAccess === true) {
+    const subAdminPermissionKeys = [
+        input.grantAccountsPageAccess === true ? "accounts" : null,
+        input.grantAccountInfoPageAccess === true ? "account_info" : null,
+    ].filter((permissionKey): permissionKey is "accounts" | "account_info" => Boolean(permissionKey))
+
+    if (requestedRole === "sub_admin" && subAdminPermissionKeys.length > 0) {
         const { error: permissionError } = await adminSupabase
             .from("admin_dashboard_permissions")
-            .insert({
-                granted_by: access.user.id,
-                permission_key: "accounts",
-                user_id: userId,
-            })
+            .insert(
+                subAdminPermissionKeys.map((permissionKey) => ({
+                    granted_by: access.user.id,
+                    permission_key: permissionKey,
+                    user_id: userId,
+                }))
+            )
 
         if (permissionError) {
             await cleanupCreatedAuthUser(userId)
@@ -158,12 +175,13 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
         metadata: {
             email,
             full_name: fullName,
-            granted_accounts_page_access: requestedRole === "sub_admin" && input.grantAccountsPageAccess === true,
+            granted_permission_keys: requestedRole === "sub_admin" ? subAdminPermissionKeys : [],
             role: requestedRole,
         },
     })
 
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/admins")
     revalidatePath("/dashboard")
 

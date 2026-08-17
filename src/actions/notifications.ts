@@ -233,6 +233,7 @@ export async function sendUserMessage(prevState: SendMessageState, formData: For
 
         revalidatePath("/dashboard/notifications")
         revalidatePath("/dashboard/accounts")
+        revalidatePath("/dashboard/account-info")
         revalidatePath("/account/notifications")
 
         return {

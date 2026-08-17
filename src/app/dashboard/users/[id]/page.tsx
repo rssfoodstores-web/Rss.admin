@@ -530,7 +530,7 @@ function SupportMetricCard({ title, value, helper }: { title: string; value: str
 }
 
 export default async function UserProfilePage({ params }: PageProps) {
-    const access = await requireAdminRouteAccess("accounts")
+    const access = await requireAdminRouteAccess("account_info")
     const { id } = await params
     const supabase = access.supabase
 

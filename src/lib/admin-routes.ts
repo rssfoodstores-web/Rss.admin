@@ -138,8 +138,15 @@ export const ADMIN_ROUTE_DEFINITIONS = [
     },
     {
         key: "accounts",
-        title: "Accounts",
+        title: "Add Users",
         href: "/dashboard/accounts",
+        assignableToSubAdmin: true,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
+        key: "account_info",
+        title: "Account Info",
+        href: "/dashboard/account-info",
         assignableToSubAdmin: true,
         allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
     },

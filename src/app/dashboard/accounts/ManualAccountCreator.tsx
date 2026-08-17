@@ -49,6 +49,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
     const [password, setPassword] = useState("")
     const [role, setRole] = useState<ManualAccountRole>("customer")
     const [grantAccountsPageAccess, setGrantAccountsPageAccess] = useState(true)
+    const [grantAccountInfoPageAccess, setGrantAccountInfoPageAccess] = useState(false)
     const [showPassword, setShowPassword] = useState(false)
     const [createdCredentials, setCreatedCredentials] = useState<{
         email: string
@@ -86,6 +87,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
             const result = await createManualAccount({
                 email,
                 fullName,
+                grantAccountInfoPageAccess: role === "sub_admin" && grantAccountInfoPageAccess,
                 grantAccountsPageAccess: role === "sub_admin" && grantAccountsPageAccess,
                 password: submittedPassword,
                 role,
@@ -110,6 +112,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
             setPassword("")
             setRole("customer")
             setGrantAccountsPageAccess(true)
+            setGrantAccountInfoPageAccess(false)
             toast({
                 title: "Account created",
                 description: `${result.createdUser.email} can now sign in.`,
@@ -211,21 +214,38 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     </div>
 
                     {role === "sub_admin" ? (
-                        <label className="flex items-start gap-3 rounded-md border p-3 md:col-span-2">
-                            <Checkbox
-                                checked={grantAccountsPageAccess}
-                                onCheckedChange={(checked) => setGrantAccountsPageAccess(checked === true)}
-                            />
-                            <span className="space-y-1">
-                                <span className="flex items-center gap-2 text-sm font-medium">
-                                    <ShieldCheck className="h-4 w-4 text-orange-500" />
-                                    Accounts page access
+                        <div className="space-y-3 md:col-span-2">
+                            <label className="flex items-start gap-3 rounded-md border p-3">
+                                <Checkbox
+                                    checked={grantAccountsPageAccess}
+                                    onCheckedChange={(checked) => setGrantAccountsPageAccess(checked === true)}
+                                />
+                                <span className="space-y-1">
+                                    <span className="flex items-center gap-2 text-sm font-medium">
+                                        <ShieldCheck className="h-4 w-4 text-orange-500" />
+                                        Add Users page access
+                                    </span>
+                                    <span className="block text-sm text-muted-foreground">
+                                        Let this sub-admin create user accounts after signing in.
+                                    </span>
                                 </span>
-                                <span className="block text-sm text-muted-foreground">
-                                    Let this sub-admin open this page after signing in.
+                            </label>
+                            <label className="flex items-start gap-3 rounded-md border p-3">
+                                <Checkbox
+                                    checked={grantAccountInfoPageAccess}
+                                    onCheckedChange={(checked) => setGrantAccountInfoPageAccess(checked === true)}
+                                />
+                                <span className="space-y-1">
+                                    <span className="flex items-center gap-2 text-sm font-medium">
+                                        <ShieldCheck className="h-4 w-4 text-orange-500" />
+                                        Account Info page access
+                                    </span>
+                                    <span className="block text-sm text-muted-foreground">
+                                        Let this sub-admin view the account table and user profile details.
+                                    </span>
                                 </span>
-                            </span>
-                        </label>
+                            </label>
+                        </div>
                     ) : null}
 
                     <div className="md:col-span-2">

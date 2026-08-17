@@ -14,12 +14,14 @@ import {
     Settings,
     LogOut,
     Users,
+    UserPlus,
     ShieldAlert,
     Megaphone,
     Sparkles,
     CircleHelp,
     FileText,
     Shield,
+    UserSearch,
     type LucideIcon,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -158,9 +160,15 @@ const navItems: NavItem[] = [
     },
     {
         key: "accounts",
-        title: "Accounts",
+        title: "Add Users",
         href: "/dashboard/accounts",
-        icon: Users,
+        icon: UserPlus,
+    },
+    {
+        key: "account_info",
+        title: "Account Info",
+        href: "/dashboard/account-info",
+        icon: UserSearch,
     },
     {
         key: "admins",

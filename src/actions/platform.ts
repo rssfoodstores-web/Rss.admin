@@ -383,6 +383,7 @@ export async function approveMerchantLocationRequest(formData: FormData) {
 
     revalidatePath("/dashboard/location-access")
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
@@ -440,6 +441,7 @@ export async function denyMerchantLocationRequest(formData: FormData) {
 
     revalidatePath("/dashboard/location-access")
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/audit-logs")
     return { success: true }
 }
