@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { AccountsDataTable } from "@/components/dashboard/accounts/accounts-data-table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ManualAccountCreator } from "./ManualAccountCreator"
 
 type AccountRole = "supa_admin" | "sub_admin" | "admin" | "merchant" | "agent" | "rider" | "customer"
 
@@ -26,7 +27,7 @@ function getPrimaryAccountRole(options: {
 }
 
 export default async function AccountsPage() {
-    await requireAdminRouteAccess("accounts")
+    const access = await requireAdminRouteAccess("accounts")
     const supabase = await createClient()
 
     const { data: profiles, error: profilesError } = await supabase
@@ -170,6 +171,10 @@ export default async function AccountsPage() {
                         <div className="text-3xl font-bold text-foreground">{administrativeSeats}</div>
                     </CardContent>
                 </Card>
+            </div>
+
+            <div className="animate-in slide-in-from-bottom-5 duration-700 delay-200 fill-mode-both">
+                <ManualAccountCreator canCreateAdminRoles={access.primaryRole !== "sub_admin"} />
             </div>
 
             <div className="animate-in slide-in-from-bottom-6 duration-700 delay-300 fill-mode-both">
