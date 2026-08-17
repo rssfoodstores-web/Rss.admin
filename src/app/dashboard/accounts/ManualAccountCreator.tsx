@@ -15,7 +15,7 @@ import {
     SelectValue,
 } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
-import { createManualAccount, type ManualAccountRole } from "./actions"
+import type { ManualAccountRole } from "./roles"
 
 interface ManualAccountCreatorProps {
     canCreateAdminRoles: boolean
@@ -84,14 +84,27 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
         const submittedPassword = password
 
         startTransition(async () => {
-            const result = await createManualAccount({
-                email,
-                fullName,
-                grantAccountInfoPageAccess: role === "sub_admin" && grantAccountInfoPageAccess,
-                grantAccountsPageAccess: role === "sub_admin" && grantAccountsPageAccess,
-                password: submittedPassword,
-                role,
+            const response = await fetch("/dashboard/accounts/create", {
+                body: JSON.stringify({
+                    email,
+                    fullName,
+                    grantAccountInfoPageAccess: role === "sub_admin" && grantAccountInfoPageAccess,
+                    grantAccountsPageAccess: role === "sub_admin" && grantAccountsPageAccess,
+                    password: submittedPassword,
+                    role,
+                }),
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                method: "POST",
             })
+            const result = await response.json() as {
+                createdUser?: {
+                    email: string
+                    role: ManualAccountRole
+                }
+                error?: string
+            }
 
             if (result.error || !result.createdUser) {
                 toast({

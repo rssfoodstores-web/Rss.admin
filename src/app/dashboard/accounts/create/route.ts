@@ -1,27 +1,16 @@
-"use server"
-
+import { NextResponse } from "next/server"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
-
-export const MANUAL_ACCOUNT_ROLES = [
-    "customer",
-    "merchant",
-    "rider",
-    "agent",
-    "admin",
-    "sub_admin",
-] as const
-
-export type ManualAccountRole = (typeof MANUAL_ACCOUNT_ROLES)[number]
+import { isManualAccountRole, type ManualAccountRole } from "../roles"
 
 interface CreateManualAccountInput {
     grantAccountInfoPageAccess?: boolean
-    email: string
+    email?: string
     fullName?: string
     grantAccountsPageAccess?: boolean
-    password: string
-    role: ManualAccountRole
+    password?: string
+    role?: string
 }
 
 interface CreateManualAccountResult {
@@ -36,10 +25,6 @@ interface CreateManualAccountResult {
 
 const PRIVILEGED_ROLES = new Set<ManualAccountRole>(["admin", "sub_admin"])
 
-function isManualAccountRole(value: string): value is ManualAccountRole {
-    return MANUAL_ACCOUNT_ROLES.includes(value as ManualAccountRole)
-}
-
 function normalizeEmail(value: string) {
     return value.trim().toLowerCase()
 }
@@ -53,10 +38,8 @@ async function cleanupCreatedAuthUser(userId: string) {
 
     try {
         adminSupabase = createAdminClient()
-    } catch (error) {
-        return {
-            error: error instanceof Error ? error.message : "Supabase admin credentials are not configured.",
-        }
+    } catch {
+        return
     }
 
     await adminSupabase.from("admin_dashboard_permissions").delete().eq("user_id", userId)
@@ -65,26 +48,31 @@ async function cleanupCreatedAuthUser(userId: string) {
     await adminSupabase.auth.admin.deleteUser(userId)
 }
 
-export async function createManualAccount(input: CreateManualAccountInput): Promise<CreateManualAccountResult> {
+function json(result: CreateManualAccountResult, status = 200) {
+    return NextResponse.json(result, { status })
+}
+
+export async function POST(request: Request) {
     const access = await requireAdminRouteAccess("accounts")
-    const email = normalizeEmail(input.email)
-    const password = input.password.trim()
-    const requestedRole = input.role
+    const input = await request.json() as CreateManualAccountInput
+    const email = normalizeEmail(input.email ?? "")
+    const password = (input.password ?? "").trim()
+    const requestedRole = input.role ?? "customer"
 
     if (!email || !email.includes("@")) {
-        return { error: "Enter a valid email address." }
+        return json({ error: "Enter a valid email address." }, 400)
     }
 
     if (password.length < 6) {
-        return { error: "Password must be at least 6 characters." }
+        return json({ error: "Password must be at least 6 characters." }, 400)
     }
 
     if (!isManualAccountRole(requestedRole)) {
-        return { error: "Select a valid account role." }
+        return json({ error: "Select a valid account role." }, 400)
     }
 
     if (PRIVILEGED_ROLES.has(requestedRole) && access.primaryRole === "sub_admin") {
-        return { error: "Sub-admins cannot create admin or sub-admin accounts." }
+        return json({ error: "Sub-admins cannot create admin or sub-admin accounts." }, 403)
     }
 
     const fullName = input.fullName?.trim() || getFallbackName(email)
@@ -93,9 +81,9 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
     try {
         adminSupabase = createAdminClient()
     } catch (error) {
-        return {
+        return json({
             error: error instanceof Error ? error.message : "Supabase admin credentials are not configured.",
-        }
+        }, 500)
     }
 
     const { data: created, error: createError } = await adminSupabase.auth.admin.createUser({
@@ -108,9 +96,9 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
     })
 
     if (createError || !created.user) {
-        return {
+        return json({
             error: createError?.message ?? "Supabase did not return the created user.",
-        }
+        }, 400)
     }
 
     const userId = created.user.id
@@ -129,7 +117,7 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
 
     if (profileError) {
         await cleanupCreatedAuthUser(userId)
-        return { error: profileError.message }
+        return json({ error: profileError.message }, 400)
     }
 
     const { error: roleError } = await adminSupabase
@@ -141,7 +129,7 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
 
     if (roleError) {
         await cleanupCreatedAuthUser(userId)
-        return { error: roleError.message }
+        return json({ error: roleError.message }, 400)
     }
 
     const subAdminPermissionKeys = [
@@ -162,7 +150,7 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
 
         if (permissionError) {
             await cleanupCreatedAuthUser(userId)
-            return { error: permissionError.message }
+            return json({ error: permissionError.message }, 400)
         }
     }
 
@@ -185,12 +173,12 @@ export async function createManualAccount(input: CreateManualAccountInput): Prom
     revalidatePath("/dashboard/admins")
     revalidatePath("/dashboard")
 
-    return {
+    return json({
         createdUser: {
             email,
             id: userId,
             role: requestedRole,
         },
         success: true,
-    }
+    })
 }
