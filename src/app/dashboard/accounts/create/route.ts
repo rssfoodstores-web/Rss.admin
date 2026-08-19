@@ -2,21 +2,28 @@ import { NextResponse } from "next/server"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
+import { isValidE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone"
 import { isManualAccountRole, type ManualAccountRole } from "../roles"
+
+type ManualAccountIdentifierType = "email" | "phone"
 
 interface CreateManualAccountInput {
     grantAccountInfoPageAccess?: boolean
     email?: string
     fullName?: string
     grantAccountsPageAccess?: boolean
+    identifierType?: ManualAccountIdentifierType
     password?: string
+    phone?: string
     role?: string
 }
 
 interface CreateManualAccountResult {
     createdUser?: {
-        email: string
+        email?: string
         id: string
+        identifierType: ManualAccountIdentifierType
+        phone?: string
         role: ManualAccountRole
     }
     error?: string
@@ -31,6 +38,10 @@ function normalizeEmail(value: string) {
 
 function getFallbackName(email: string) {
     return email.split("@")[0]?.replace(/[._-]+/g, " ").trim() || email
+}
+
+function getPhoneFallbackName(phone: string) {
+    return `Customer ${phone}`
 }
 
 async function cleanupCreatedAuthUser(userId: string) {
@@ -55,12 +66,18 @@ function json(result: CreateManualAccountResult, status = 200) {
 export async function POST(request: Request) {
     const access = await requireAdminRouteAccess("accounts")
     const input = await request.json() as CreateManualAccountInput
+    const identifierType = input.identifierType === "phone" ? "phone" : "email"
     const email = normalizeEmail(input.email ?? "")
+    const phone = normalizePhoneNumber(input.phone ?? "")
     const password = (input.password ?? "").trim()
     const requestedRole = input.role ?? "customer"
 
-    if (!email || !email.includes("@")) {
+    if (identifierType === "email" && (!email || !email.includes("@"))) {
         return json({ error: "Enter a valid email address." }, 400)
+    }
+
+    if (identifierType === "phone" && !isValidE164PhoneNumber(phone)) {
+        return json({ error: "Enter a valid phone number." }, 400)
     }
 
     if (password.length < 6) {
@@ -75,7 +92,9 @@ export async function POST(request: Request) {
         return json({ error: "Sub-admins cannot create admin or sub-admin accounts." }, 403)
     }
 
-    const fullName = input.fullName?.trim() || getFallbackName(email)
+    const fullName = input.fullName?.trim() || (
+        identifierType === "phone" ? getPhoneFallbackName(phone) : getFallbackName(email)
+    )
     let adminSupabase: ReturnType<typeof createAdminClient>
 
     try {
@@ -86,14 +105,23 @@ export async function POST(request: Request) {
         }, 500)
     }
 
-    const { data: created, error: createError } = await adminSupabase.auth.admin.createUser({
-        email,
-        email_confirm: true,
-        password,
-        user_metadata: {
-            full_name: fullName,
-        },
-    })
+    const { data: created, error: createError } = identifierType === "phone"
+        ? await adminSupabase.auth.admin.createUser({
+            password,
+            phone,
+            phone_confirm: true,
+            user_metadata: {
+                full_name: fullName,
+            },
+        })
+        : await adminSupabase.auth.admin.createUser({
+            email,
+            email_confirm: true,
+            password,
+            user_metadata: {
+                full_name: fullName,
+            },
+        })
 
     if (createError || !created.user) {
         return json({
@@ -108,6 +136,7 @@ export async function POST(request: Request) {
             {
                 full_name: fullName,
                 id: userId,
+                phone: identifierType === "phone" ? phone : undefined,
                 updated_at: new Date().toISOString(),
             },
             {
@@ -161,9 +190,11 @@ export async function POST(request: Request) {
         entity_id: userId,
         entity_type: "auth_user",
         metadata: {
-            email,
+            email: identifierType === "email" ? email : null,
             full_name: fullName,
             granted_permission_keys: requestedRole === "sub_admin" ? subAdminPermissionKeys : [],
+            identifier_type: identifierType,
+            phone: identifierType === "phone" ? phone : null,
             role: requestedRole,
         },
     })
@@ -175,8 +206,10 @@ export async function POST(request: Request) {
 
     return json({
         createdUser: {
-            email,
+            email: identifierType === "email" ? email : undefined,
             id: userId,
+            identifierType,
+            phone: identifierType === "phone" ? phone : undefined,
             role: requestedRole,
         },
         success: true,

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
-import { Copy, Eye, EyeOff, KeyRound, Save, ShieldCheck, UserPlus } from "lucide-react"
+import { Copy, Eye, EyeOff, KeyRound, Mail, Phone, Save, ShieldCheck, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -20,6 +20,8 @@ import type { ManualAccountRole } from "./roles"
 interface ManualAccountCreatorProps {
     canCreateAdminRoles: boolean
 }
+
+type ManualAccountIdentifierType = "email" | "phone"
 
 const regularRoleOptions: Array<{ label: string; value: ManualAccountRole }> = [
     { label: "Customer", value: "customer" },
@@ -41,10 +43,16 @@ function generatePassword() {
     return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")
 }
 
+function getCredentialLabel(identifierType: ManualAccountIdentifierType) {
+    return identifierType === "phone" ? "Phone" : "Email"
+}
+
 export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreatorProps) {
     const { toast } = useToast()
     const [isPending, startTransition] = useTransition()
+    const [identifierType, setIdentifierType] = useState<ManualAccountIdentifierType>("email")
     const [email, setEmail] = useState("")
+    const [phone, setPhone] = useState("")
     const [fullName, setFullName] = useState("")
     const [password, setPassword] = useState("")
     const [role, setRole] = useState<ManualAccountRole>("customer")
@@ -52,7 +60,8 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
     const [grantAccountInfoPageAccess, setGrantAccountInfoPageAccess] = useState(false)
     const [showPassword, setShowPassword] = useState(false)
     const [createdCredentials, setCreatedCredentials] = useState<{
-        email: string
+        identifier: string
+        identifierType: ManualAccountIdentifierType
         password: string
         role: ManualAccountRole
     } | null>(null)
@@ -61,6 +70,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
         () => canCreateAdminRoles ? [...regularRoleOptions, ...adminRoleOptions] : regularRoleOptions,
         [canCreateAdminRoles]
     )
+    const identifierValue = identifierType === "phone" ? phone : email
 
     function copyCredentials() {
         if (!createdCredentials) {
@@ -69,7 +79,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
 
         const message = [
             "Your RSS Foods account has been created.",
-            `Email: ${createdCredentials.email}`,
+            `${getCredentialLabel(createdCredentials.identifierType)}: ${createdCredentials.identifier}`,
             `Password: ${createdCredentials.password}`,
         ].join("\n")
 
@@ -90,7 +100,9 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     fullName,
                     grantAccountInfoPageAccess: role === "sub_admin" && grantAccountInfoPageAccess,
                     grantAccountsPageAccess: role === "sub_admin" && grantAccountsPageAccess,
+                    identifierType,
                     password: submittedPassword,
+                    phone,
                     role,
                 }),
                 headers: {
@@ -100,13 +112,19 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
             })
             const result = await response.json() as {
                 createdUser?: {
-                    email: string
+                    email?: string
+                    identifierType: ManualAccountIdentifierType
+                    phone?: string
                     role: ManualAccountRole
                 }
                 error?: string
             }
 
-            if (result.error || !result.createdUser) {
+            const createdIdentifier = result.createdUser?.identifierType === "phone"
+                ? result.createdUser.phone
+                : result.createdUser?.email
+
+            if (result.error || !result.createdUser || !createdIdentifier) {
                 toast({
                     title: "Account creation failed",
                     description: result.error ?? "The account could not be created.",
@@ -116,11 +134,13 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
             }
 
             setCreatedCredentials({
-                email: result.createdUser.email,
+                identifier: createdIdentifier,
+                identifierType: result.createdUser.identifierType,
                 password: submittedPassword,
                 role: result.createdUser.role,
             })
             setEmail("")
+            setPhone("")
             setFullName("")
             setPassword("")
             setRole("customer")
@@ -128,7 +148,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
             setGrantAccountInfoPageAccess(false)
             toast({
                 title: "Account created",
-                description: `${result.createdUser.email} can now sign in.`,
+                description: `${createdIdentifier} can now sign in.`,
             })
         })
     }
@@ -142,24 +162,63 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     </div>
                     <div>
                         <CardTitle>Create user account</CardTitle>
-                        <CardDescription>Email-confirmed account with a selected role.</CardDescription>
+                        <CardDescription>Email, phone, or role-based account with a password.</CardDescription>
                     </div>
                 </div>
             </CardHeader>
             <CardContent className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
                 <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2 md:col-span-2">
-                        <Label htmlFor="manual-account-email">Email</Label>
-                        <Input
-                            id="manual-account-email"
-                            autoComplete="off"
-                            inputMode="email"
-                            onChange={(event) => setEmail(event.target.value)}
-                            placeholder="user@example.com"
-                            type="email"
-                            value={email}
-                        />
+                        <Label>Sign-in method</Label>
+                        <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
+                            <Button
+                                className="justify-center"
+                                onClick={() => setIdentifierType("email")}
+                                type="button"
+                                variant={identifierType === "email" ? "default" : "ghost"}
+                            >
+                                <Mail className="mr-2 h-4 w-4" />
+                                Email
+                            </Button>
+                            <Button
+                                className="justify-center"
+                                onClick={() => setIdentifierType("phone")}
+                                type="button"
+                                variant={identifierType === "phone" ? "default" : "ghost"}
+                            >
+                                <Phone className="mr-2 h-4 w-4" />
+                                Phone
+                            </Button>
+                        </div>
                     </div>
+
+                    {identifierType === "phone" ? (
+                        <div className="space-y-2 md:col-span-2">
+                            <Label htmlFor="manual-account-phone">Phone number</Label>
+                            <Input
+                                id="manual-account-phone"
+                                autoComplete="off"
+                                inputMode="tel"
+                                onChange={(event) => setPhone(event.target.value)}
+                                placeholder="0803 123 4567"
+                                type="tel"
+                                value={phone}
+                            />
+                        </div>
+                    ) : (
+                        <div className="space-y-2 md:col-span-2">
+                            <Label htmlFor="manual-account-email">Email</Label>
+                            <Input
+                                id="manual-account-email"
+                                autoComplete="off"
+                                inputMode="email"
+                                onChange={(event) => setEmail(event.target.value)}
+                                placeholder="user@example.com"
+                                type="email"
+                                value={email}
+                            />
+                        </div>
+                    )}
 
                     <div className="space-y-2">
                         <Label htmlFor="manual-account-name">Display name</Label>
@@ -264,7 +323,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     <div className="md:col-span-2">
                         <Button
                             className="bg-orange-500 text-white hover:bg-orange-600"
-                            disabled={isPending || !email || !password}
+                            disabled={isPending || !identifierValue || !password}
                             onClick={handleCreateAccount}
                             type="button"
                         >
@@ -279,8 +338,10 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     {createdCredentials ? (
                         <div className="mt-4 space-y-4">
                             <div className="space-y-1">
-                                <div className="text-xs uppercase text-muted-foreground">Email</div>
-                                <div className="break-all font-medium">{createdCredentials.email}</div>
+                                <div className="text-xs uppercase text-muted-foreground">
+                                    {getCredentialLabel(createdCredentials.identifierType)}
+                                </div>
+                                <div className="break-all font-medium">{createdCredentials.identifier}</div>
                             </div>
                             <div className="space-y-1">
                                 <div className="text-xs uppercase text-muted-foreground">Password</div>
