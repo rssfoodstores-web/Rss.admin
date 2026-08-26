@@ -1,6 +1,7 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Copy, Eye, EyeOff, KeyRound, Mail, Phone, Save, ShieldCheck, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -35,12 +36,43 @@ const adminRoleOptions: Array<{ label: string; value: ManualAccountRole }> = [
     { label: "Sub Admin", value: "sub_admin" },
 ]
 
-function generatePassword() {
-    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%&*"
-    const bytes = new Uint32Array(14)
-    crypto.getRandomValues(bytes)
+const PASSWORD_GROUPS = [
+    "ABCDEFGHJKLMNPQRSTUVWXYZ",
+    "abcdefghijkmnopqrstuvwxyz",
+    "23456789",
+    "!@#$%&*",
+] as const
 
-    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("")
+const PASSWORD_ALPHABET = PASSWORD_GROUPS.join("")
+const GENERATED_PASSWORD_LENGTH = 16
+
+function getSecureRandomIndex(maxExclusive: number) {
+    const range = 0x100000000
+    const unbiasedLimit = Math.floor(range / maxExclusive) * maxExclusive
+    const randomValue = new Uint32Array(1)
+
+    do {
+        crypto.getRandomValues(randomValue)
+    } while (randomValue[0] >= unbiasedLimit)
+
+    return randomValue[0] % maxExclusive
+}
+
+function generatePassword() {
+    const characters = PASSWORD_GROUPS.map((group) => group[getSecureRandomIndex(group.length)])
+
+    while (characters.length < GENERATED_PASSWORD_LENGTH) {
+        characters.push(PASSWORD_ALPHABET[getSecureRandomIndex(PASSWORD_ALPHABET.length)])
+    }
+
+    for (let index = characters.length - 1; index > 0; index -= 1) {
+        const swapIndex = getSecureRandomIndex(index + 1)
+        const currentCharacter = characters[index]
+        characters[index] = characters[swapIndex]
+        characters[swapIndex] = currentCharacter
+    }
+
+    return characters.join("")
 }
 
 function getCredentialLabel(identifierType: ManualAccountIdentifierType) {
@@ -48,8 +80,10 @@ function getCredentialLabel(identifierType: ManualAccountIdentifierType) {
 }
 
 export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreatorProps) {
+    const router = useRouter()
     const { toast } = useToast()
-    const [isPending, startTransition] = useTransition()
+    const submissionLockRef = useRef(false)
+    const [isSubmitting, setIsSubmitting] = useState(false)
     const [identifierType, setIdentifierType] = useState<ManualAccountIdentifierType>("email")
     const [email, setEmail] = useState("")
     const [phone, setPhone] = useState("")
@@ -59,10 +93,12 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
     const [grantAccountsPageAccess, setGrantAccountsPageAccess] = useState(true)
     const [grantAccountInfoPageAccess, setGrantAccountInfoPageAccess] = useState(false)
     const [showPassword, setShowPassword] = useState(false)
+    const [passwordGenerated, setPasswordGenerated] = useState(false)
     const [createdCredentials, setCreatedCredentials] = useState<{
         identifier: string
         identifierType: ManualAccountIdentifierType
         password: string
+        passwordGenerated: boolean
         role: ManualAccountRole
     } | null>(null)
 
@@ -90,10 +126,18 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
         })
     }
 
-    function handleCreateAccount() {
+    async function handleCreateAccount(event: React.FormEvent<HTMLFormElement>) {
+        event.preventDefault()
+
+        if (submissionLockRef.current) {
+            return
+        }
+
+        submissionLockRef.current = true
+        setIsSubmitting(true)
         const submittedPassword = password
 
-        startTransition(async () => {
+        try {
             const response = await fetch("/dashboard/accounts/create", {
                 body: JSON.stringify({
                     email,
@@ -102,6 +146,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     grantAccountsPageAccess: role === "sub_admin" && grantAccountsPageAccess,
                     identifierType,
                     password: submittedPassword,
+                    passwordGenerated,
                     phone,
                     role,
                 }),
@@ -110,47 +155,56 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                 },
                 method: "POST",
             })
-            const result = await response.json() as {
+            const result = await response.json().catch(() => null) as {
                 createdUser?: {
                     email?: string
                     identifierType: ManualAccountIdentifierType
+                    passwordGenerated: boolean
                     phone?: string
                     role: ManualAccountRole
                 }
                 error?: string
-            }
+                warning?: string
+            } | null
 
-            const createdIdentifier = result.createdUser?.identifierType === "phone"
+            const createdIdentifier = result?.createdUser?.identifierType === "phone"
                 ? result.createdUser.phone
-                : result.createdUser?.email
+                : result?.createdUser?.email
 
-            if (result.error || !result.createdUser || !createdIdentifier) {
-                toast({
-                    title: "Account creation failed",
-                    description: result.error ?? "The account could not be created.",
-                    variant: "destructive",
-                })
-                return
+            if (!response.ok || result?.error || !result?.createdUser || !createdIdentifier) {
+                throw new Error(result?.error ?? "The account service returned an invalid response.")
             }
 
             setCreatedCredentials({
                 identifier: createdIdentifier,
                 identifierType: result.createdUser.identifierType,
                 password: submittedPassword,
+                passwordGenerated: result.createdUser.passwordGenerated,
                 role: result.createdUser.role,
             })
             setEmail("")
             setPhone("")
             setFullName("")
             setPassword("")
+            setPasswordGenerated(false)
             setRole("customer")
             setGrantAccountsPageAccess(true)
             setGrantAccountInfoPageAccess(false)
             toast({
                 title: "Account created",
-                description: `${createdIdentifier} can now sign in.`,
+                description: result.warning ?? `${createdIdentifier} is registered and ready to sign in.`,
             })
-        })
+            router.refresh()
+        } catch (error) {
+            toast({
+                title: "Account creation failed",
+                description: error instanceof Error ? error.message : "The account could not be created.",
+                variant: "destructive",
+            })
+        } finally {
+            submissionLockRef.current = false
+            setIsSubmitting(false)
+        }
     }
 
     return (
@@ -167,7 +221,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                 </div>
             </CardHeader>
             <CardContent className="grid gap-6 lg:grid-cols-[1fr_0.8fr]">
-                <div className="grid gap-4 md:grid-cols-2">
+                <form className="grid gap-4 md:grid-cols-2" onSubmit={handleCreateAccount}>
                     <div className="space-y-2 md:col-span-2">
                         <Label>Sign-in method</Label>
                         <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/20 p-1">
@@ -255,7 +309,10 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                                     id="manual-account-password"
                                     autoComplete="new-password"
                                     className="pr-10"
-                                    onChange={(event) => setPassword(event.target.value)}
+                                    onChange={(event) => {
+                                        setPassword(event.target.value)
+                                        setPasswordGenerated(false)
+                                    }}
                                     placeholder="Minimum 6 characters"
                                     type={showPassword ? "text" : "password"}
                                     value={password}
@@ -274,6 +331,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                             <Button
                                 onClick={() => {
                                     setPassword(generatePassword())
+                                    setPasswordGenerated(true)
                                     setShowPassword(true)
                                 }}
                                 type="button"
@@ -283,6 +341,9 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                                 Generate
                             </Button>
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                            Generated passwords always include uppercase and lowercase letters, a number, and a symbol.
+                        </p>
                     </div>
 
                     {role === "sub_admin" ? (
@@ -323,15 +384,14 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                     <div className="md:col-span-2">
                         <Button
                             className="bg-orange-500 text-white hover:bg-orange-600"
-                            disabled={isPending || !identifierValue || !password}
-                            onClick={handleCreateAccount}
-                            type="button"
+                            disabled={isSubmitting || !identifierValue.trim() || password.length < 6}
+                            type="submit"
                         >
                             <Save className="mr-2 h-4 w-4" />
-                            {isPending ? "Creating..." : "Create account"}
+                            {isSubmitting ? "Creating and verifying..." : "Create account"}
                         </Button>
                     </div>
-                </div>
+                </form>
 
                 <div className="rounded-md border bg-muted/20 p-4">
                     <div className="text-sm font-medium">Latest credentials</div>
@@ -346,6 +406,9 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                             <div className="space-y-1">
                                 <div className="text-xs uppercase text-muted-foreground">Password</div>
                                 <div className="break-all font-mono text-sm">{createdCredentials.password}</div>
+                                <div className="text-xs text-muted-foreground">
+                                    {createdCredentials.passwordGenerated ? "Securely generated" : "Entered by the administrator"}
+                                </div>
                             </div>
                             <div className="space-y-1">
                                 <div className="text-xs uppercase text-muted-foreground">Role</div>

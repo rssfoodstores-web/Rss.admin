@@ -14,6 +14,7 @@ interface CreateManualAccountInput {
     grantAccountsPageAccess?: boolean
     identifierType?: ManualAccountIdentifierType
     password?: string
+    passwordGenerated?: boolean
     phone?: string
     role?: string
 }
@@ -23,11 +24,13 @@ interface CreateManualAccountResult {
         email?: string
         id: string
         identifierType: ManualAccountIdentifierType
+        passwordGenerated: boolean
         phone?: string
         role: ManualAccountRole
     }
     error?: string
     success?: true
+    warning?: string
 }
 
 const PRIVILEGED_ROLES = new Set<ManualAccountRole>(["admin", "sub_admin"])
@@ -44,15 +47,10 @@ function getPhoneFallbackName(phone: string) {
     return `Customer ${phone}`
 }
 
-async function cleanupCreatedAuthUser(userId: string) {
-    let adminSupabase: ReturnType<typeof createAdminClient>
-
-    try {
-        adminSupabase = createAdminClient()
-    } catch {
-        return
-    }
-
+async function cleanupCreatedAuthUser(
+    adminSupabase: ReturnType<typeof createAdminClient>,
+    userId: string
+) {
     await adminSupabase.from("admin_dashboard_permissions").delete().eq("user_id", userId)
     await adminSupabase.from("user_roles").delete().eq("user_id", userId)
     await adminSupabase.from("profiles").delete().eq("id", userId)
@@ -65,11 +63,17 @@ function json(result: CreateManualAccountResult, status = 200) {
 
 export async function POST(request: Request) {
     const access = await requireAdminRouteAccess("accounts")
-    const input = await request.json() as CreateManualAccountInput
+    const input = await request.json().catch(() => null) as CreateManualAccountInput | null
+
+    if (!input) {
+        return json({ error: "The account request was not valid JSON." }, 400)
+    }
+
     const identifierType = input.identifierType === "phone" ? "phone" : "email"
     const email = normalizeEmail(input.email ?? "")
     const phone = normalizePhoneNumber(input.phone ?? "")
-    const password = (input.password ?? "").trim()
+    const password = input.password ?? ""
+    const passwordGenerated = input.passwordGenerated === true
     const requestedRole = input.role ?? "customer"
 
     if (identifierType === "email" && (!email || !email.includes("@"))) {
@@ -108,6 +112,12 @@ export async function POST(request: Request) {
 
     const { data: created, error: createError } = identifierType === "phone"
         ? await adminSupabase.auth.admin.createUser({
+            app_metadata: {
+                created_role: requestedRole,
+                creation_method: "admin_password_account",
+                identifier_type: identifierType,
+                password_generated: passwordGenerated,
+            },
             password,
             phone,
             phone_confirm: true,
@@ -116,6 +126,12 @@ export async function POST(request: Request) {
             },
         })
         : await adminSupabase.auth.admin.createUser({
+            app_metadata: {
+                created_role: requestedRole,
+                creation_method: "admin_password_account",
+                identifier_type: identifierType,
+                password_generated: passwordGenerated,
+            },
             email,
             email_confirm: true,
             password,
@@ -146,19 +162,24 @@ export async function POST(request: Request) {
         )
 
     if (profileError) {
-        await cleanupCreatedAuthUser(userId)
+        await cleanupCreatedAuthUser(adminSupabase, userId)
         return json({ error: profileError.message }, 400)
     }
 
     const { error: roleError } = await adminSupabase
         .from("user_roles")
-        .insert({
-            role: requestedRole,
-            user_id: userId,
-        })
+        .upsert(
+            {
+                role: requestedRole,
+                user_id: userId,
+            },
+            {
+                onConflict: "user_id,role",
+            }
+        )
 
     if (roleError) {
-        await cleanupCreatedAuthUser(userId)
+        await cleanupCreatedAuthUser(adminSupabase, userId)
         return json({ error: roleError.message }, 400)
     }
 
@@ -170,21 +191,70 @@ export async function POST(request: Request) {
     if (requestedRole === "sub_admin" && subAdminPermissionKeys.length > 0) {
         const { error: permissionError } = await adminSupabase
             .from("admin_dashboard_permissions")
-            .insert(
+            .upsert(
                 subAdminPermissionKeys.map((permissionKey) => ({
                     granted_by: access.user.id,
                     permission_key: permissionKey,
                     user_id: userId,
-                }))
+                })),
+                {
+                    onConflict: "user_id,permission_key",
+                }
             )
 
         if (permissionError) {
-            await cleanupCreatedAuthUser(userId)
+            await cleanupCreatedAuthUser(adminSupabase, userId)
             return json({ error: permissionError.message }, 400)
         }
     }
 
-    await adminSupabase.from("audit_logs").insert({
+    const [authVerification, profileVerification, roleVerification] = await Promise.all([
+        adminSupabase.auth.admin.getUserById(userId),
+        adminSupabase
+            .from("profiles")
+            .select("id")
+            .eq("id", userId)
+            .maybeSingle(),
+        adminSupabase
+            .from("user_roles")
+            .select("user_id")
+            .eq("user_id", userId)
+            .eq("role", requestedRole)
+            .maybeSingle(),
+    ])
+    const verifiedAuthUser = authVerification.data.user
+    const identifierMatches = identifierType === "phone"
+        ? verifiedAuthUser?.phone === phone
+        : verifiedAuthUser?.email?.toLowerCase() === email
+    const identifierConfirmed = identifierType === "phone"
+        ? Boolean(verifiedAuthUser?.phone_confirmed_at)
+        : Boolean(verifiedAuthUser?.email_confirmed_at)
+
+    if (
+        authVerification.error
+        || !verifiedAuthUser
+        || !identifierMatches
+        || !identifierConfirmed
+        || profileVerification.error
+        || !profileVerification.data
+        || roleVerification.error
+        || !roleVerification.data
+    ) {
+        console.error("Manual account verification failed:", {
+            authError: authVerification.error?.message,
+            identifierConfirmed,
+            identifierMatches,
+            profileError: profileVerification.error?.message,
+            profileFound: Boolean(profileVerification.data),
+            roleError: roleVerification.error?.message,
+            roleFound: Boolean(roleVerification.data),
+            userId,
+        })
+        await cleanupCreatedAuthUser(adminSupabase, userId)
+        return json({ error: "The login could not be verified, so the incomplete account was rolled back." }, 500)
+    }
+
+    const { error: auditError } = await adminSupabase.from("audit_logs").insert({
         action: "create_manual_account",
         actor_id: access.user.id,
         actor_role: access.primaryRole,
@@ -195,12 +265,14 @@ export async function POST(request: Request) {
             full_name: fullName,
             granted_permission_keys: requestedRole === "sub_admin" ? subAdminPermissionKeys : [],
             identifier_type: identifierType,
+            password_generated: passwordGenerated,
             phone: identifierType === "phone" ? phone : null,
             role: requestedRole,
         },
     })
 
     revalidatePath("/dashboard/accounts")
+    revalidatePath("/dashboard/accounts/created")
     revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard/admins")
     revalidatePath("/dashboard")
@@ -210,9 +282,13 @@ export async function POST(request: Request) {
             email: identifierType === "email" ? email : undefined,
             id: userId,
             identifierType,
+            passwordGenerated,
             phone: identifierType === "phone" ? phone : undefined,
             role: requestedRole,
         },
         success: true,
+        warning: auditError
+            ? "The account is ready to sign in, but its audit entry could not be saved."
+            : undefined,
     })
 }
