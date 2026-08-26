@@ -20,53 +20,29 @@ import { createClient } from "@/lib/supabase/client"
 import { Loader2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
-import { buildAbsoluteUrl, getClientAdminSiteUrl } from "@/lib/site-url"
+import { GoogleIdentityButton } from "@/components/auth/GoogleIdentityButton"
 
 export function LoginForm({
     className,
     ...props
 }: React.ComponentPropsWithoutRef<"div">) {
     const [showPassword, setShowPassword] = useState(false)
-    const [googleLoading, setGoogleLoading] = useState(false)
     const [email, setEmail] = useState("")
     const [password, setPassword] = useState("")
     const [loading, setLoading] = useState(false)
     const router = useRouter()
     const { toast } = useToast()
 
-    const handleGoogleLogin = async () => {
-        try {
-            setGoogleLoading(true)
-            const supabase = createClient()
-            const redirectTo = buildAbsoluteUrl(getClientAdminSiteUrl(), "/auth/callback")
-            const { error } = await supabase.auth.signInWithOAuth({
-                provider: 'google',
-                options: {
-                    redirectTo,
-                    queryParams: {
-                        access_type: 'offline',
-                        prompt: 'consent',
-                    },
-                },
-            })
-            if (error) {
-                console.error("Google login error:", error)
-                toast({
-                    variant: "destructive",
-                    title: "Action Error",
-                    description: error.message
-                })
-            }
-        } catch (error) {
-            console.error("Unexpected error:", error)
-            toast({
-                variant: "destructive",
-                title: "Action Error",
-                description: "An unexpected error occurred"
-            })
-        } finally {
-            // We don't set loading to false immediately because of the redirect
-        }
+    const handleGoogleAuthenticated = async () => {
+        window.location.assign("/dashboard")
+    }
+
+    const handleGoogleError = (message: string) => {
+        toast({
+            variant: "destructive",
+            title: "Google Sign-in Failed",
+            description: message,
+        })
     }
 
     const handleLogin = async (e: React.FormEvent) => {
@@ -98,12 +74,13 @@ export function LoginForm({
                     <div className="flex justify-center md:justify-start mb-6">
                         {/* Logo */}
                         <div className="flex flex-col items-center">
-                            <div className="relative w-40 h-20 mb-2">
+                            <div className="relative mb-2 h-28 w-48">
                                 <Image
-                                    src="/rss-foods-logo-new.png"
+                                    src="/rss-foods-admin-login-logo.png"
                                     alt="RSS Foods Logo"
                                     fill
                                     className="object-contain"
+                                    sizes="192px"
                                     priority
                                 />
                             </div>
@@ -179,23 +156,11 @@ export function LoginForm({
                                     Or continue with
                                 </span>
                             </div>
-                            <Button
-                                variant="outline"
-                                className="w-full"
-                                onClick={handleGoogleLogin}
-                                disabled={googleLoading}
-                                type="button"
-                            >
-                                {googleLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : (
-                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="size-5 mr-2">
-                                        <path
-                                            d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .533 5.333.533 12S5.867 24 12.48 24c3.44 0 6.1-1.147 8.027-3.147 2.053-1.92 3.627-4.667 3.627-7.84 0-.667-.107-1.44-.133-1.947H12.48z"
-                                            fill="currentColor"
-                                        />
-                                    </svg>
-                                )}
-                                Sign in with Google
-                            </Button>
+                            <GoogleIdentityButton
+                                disabled={loading}
+                                onAuthenticated={handleGoogleAuthenticated}
+                                onError={handleGoogleError}
+                            />
 
                             <div className="text-center text-sm text-muted-foreground mt-4">
                                 Need any help? <Link href="#" className="font-semibold text-foreground hover:underline">Contact Support</Link>

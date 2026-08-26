@@ -26,11 +26,11 @@ export default function LoginPage() {
                 <div className="relative z-20 flex flex-col items-center gap-6 text-center">
                     <div className="rounded-2xl bg-zinc-900/50 p-4 ring-1 ring-white/10 backdrop-blur-xl">
                         <Image
-                            src="/rss-foods-logo-new.png"
+                            src="/rss-foods-admin-login-logo.png"
                             alt="RSS Foods Logo"
-                            width={160}
-                            height={160}
-                            className="h-20 w-auto object-contain"
+                            width={240}
+                            height={147}
+                            className="h-28 w-auto object-contain"
                             priority
                         />
                     </div>

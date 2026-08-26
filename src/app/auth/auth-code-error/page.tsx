@@ -10,8 +10,7 @@ export default async function AuthCodeErrorPage({ searchParams }: AuthCodeErrorP
     const params = await searchParams
     const error = typeof params.error === "string" ? params.error : "There was a problem signing you in."
     const errorCode = typeof params.error_code === "string" ? params.error_code : null
-    const errorDescription = typeof params.error_description === "string" ? params.error_description : null
-    const callbackUrl = typeof params.callback_url === "string" ? params.callback_url : null
+    const expired = error.toLowerCase().includes("expired") || errorCode?.toLowerCase().includes("expired")
 
     return (
         <div className="flex min-h-screen items-center justify-center p-4">
@@ -19,24 +18,13 @@ export default async function AuthCodeErrorPage({ searchParams }: AuthCodeErrorP
                 <CardHeader>
                     <CardTitle className="text-2xl font-bold text-destructive">Authentication Error</CardTitle>
                     <CardDescription>
-                        {error}
+                        {expired ? "This sign-in link has expired." : "We could not complete the secure sign-in."}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <p className="text-sm text-muted-foreground">
-                        {errorDescription ?? "This could be due to an expired link, a network issue, or an OAuth callback mismatch."}
+                        Please return to the admin login page and try again.
                     </p>
-                    {errorCode && (
-                        <p className="text-xs font-mono uppercase tracking-wide text-muted-foreground">
-                            {errorCode}
-                        </p>
-                    )}
-                    {callbackUrl && (
-                        <div className="rounded-md border bg-muted/40 p-3 text-left text-xs text-muted-foreground">
-                            <p className="font-semibold text-foreground">Allowlist this callback URL in Supabase Auth</p>
-                            <p className="mt-2 break-all font-mono">{callbackUrl}</p>
-                        </div>
-                    )}
                     <Button asChild className="w-full">
                         <Link href="/">Return to Login</Link>
                     </Button>

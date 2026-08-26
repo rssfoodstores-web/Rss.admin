@@ -100,8 +100,9 @@ export async function POST(request: Request) {
     try {
         adminSupabase = createAdminClient()
     } catch (error) {
+        console.error("Admin account service configuration error:", error)
         return json({
-            error: error instanceof Error ? error.message : "Supabase admin credentials are not configured.",
+            error: "The account service is not configured.",
         }, 500)
     }
 
@@ -125,7 +126,7 @@ export async function POST(request: Request) {
 
     if (createError || !created.user) {
         return json({
-            error: createError?.message ?? "Supabase did not return the created user.",
+            error: createError?.message ?? "The account service did not return the created user.",
         }, 400)
     }
 
