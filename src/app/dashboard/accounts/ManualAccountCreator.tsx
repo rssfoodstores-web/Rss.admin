@@ -388,7 +388,7 @@ export function ManualAccountCreator({ canCreateAdminRoles }: ManualAccountCreat
                             type="submit"
                         >
                             <Save className="mr-2 h-4 w-4" />
-                            {isSubmitting ? "Creating and verifying..." : "Create account"}
+                            {isSubmitting ? "Creating account..." : "Create account"}
                         </Button>
                     </div>
                 </form>

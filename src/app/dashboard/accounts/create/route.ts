@@ -208,52 +208,6 @@ export async function POST(request: Request) {
         }
     }
 
-    const [authVerification, profileVerification, roleVerification] = await Promise.all([
-        adminSupabase.auth.admin.getUserById(userId),
-        adminSupabase
-            .from("profiles")
-            .select("id")
-            .eq("id", userId)
-            .maybeSingle(),
-        adminSupabase
-            .from("user_roles")
-            .select("user_id")
-            .eq("user_id", userId)
-            .eq("role", requestedRole)
-            .maybeSingle(),
-    ])
-    const verifiedAuthUser = authVerification.data.user
-    const identifierMatches = identifierType === "phone"
-        ? verifiedAuthUser?.phone === phone
-        : verifiedAuthUser?.email?.toLowerCase() === email
-    const identifierConfirmed = identifierType === "phone"
-        ? Boolean(verifiedAuthUser?.phone_confirmed_at)
-        : Boolean(verifiedAuthUser?.email_confirmed_at)
-
-    if (
-        authVerification.error
-        || !verifiedAuthUser
-        || !identifierMatches
-        || !identifierConfirmed
-        || profileVerification.error
-        || !profileVerification.data
-        || roleVerification.error
-        || !roleVerification.data
-    ) {
-        console.error("Manual account verification failed:", {
-            authError: authVerification.error?.message,
-            identifierConfirmed,
-            identifierMatches,
-            profileError: profileVerification.error?.message,
-            profileFound: Boolean(profileVerification.data),
-            roleError: roleVerification.error?.message,
-            roleFound: Boolean(roleVerification.data),
-            userId,
-        })
-        await cleanupCreatedAuthUser(adminSupabase, userId)
-        return json({ error: "The login could not be verified, so the incomplete account was rolled back." }, 500)
-    }
-
     const { error: auditError } = await adminSupabase.from("audit_logs").insert({
         action: "create_manual_account",
         actor_id: access.user.id,
