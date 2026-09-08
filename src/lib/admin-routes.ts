@@ -39,6 +39,13 @@ export const ADMIN_ROUTE_DEFINITIONS = [
         allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
     },
     {
+        key: "whatsapp_center",
+        title: "WhatsApp Center",
+        href: "/dashboard/whatsapp",
+        assignableToSubAdmin: false,
+        allowedRoles: ["supa_admin", "admin", "sub_admin"] as const,
+    },
+    {
         key: "reports",
         title: "Finance",
         href: "/dashboard/reports",

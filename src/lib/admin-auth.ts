@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation"
 import type { User } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import {
     type AdminAccessSnapshot,
     type AdminRole,
@@ -58,21 +59,37 @@ export async function getAdminAccessContext(): Promise<AdminAccessContext> {
         )
     }
 
+    let allowedRouteKeys = primaryRole === "sub_admin"
+        ? getAccessibleAdminRoutes({
+            primaryRole,
+            assignedPermissionKeys,
+            allowedRouteKeys: [],
+        }).map((route) => route.key)
+        : getAccessibleAdminRoutes({
+            primaryRole,
+            assignedPermissionKeys: [],
+            allowedRouteKeys: [],
+        }).map((route) => route.key)
+
+    if (primaryRole !== "supa_admin") {
+        const adminSupabase = createAdminClient()
+        const { data: whatsappGrant } = await adminSupabase
+            .from("whatsapp_access_grants")
+            .select("user_id")
+            .eq("user_id", user.id)
+            .maybeSingle()
+        const hasWhatsAppAccess = Boolean(whatsappGrant)
+
+        allowedRouteKeys = allowedRouteKeys.filter((key) => key !== "whatsapp_center")
+        if (hasWhatsAppAccess) {
+            allowedRouteKeys.push("whatsapp_center")
+        }
+    }
+
     const accessSnapshot: AdminAccessSnapshot = {
         primaryRole,
         assignedPermissionKeys,
-        allowedRouteKeys:
-            primaryRole === "sub_admin"
-                ? getAccessibleAdminRoutes({
-                    primaryRole,
-                    assignedPermissionKeys,
-                    allowedRouteKeys: [],
-                }).map((route) => route.key)
-                : getAccessibleAdminRoutes({
-                    primaryRole,
-                    assignedPermissionKeys: [],
-                    allowedRouteKeys: [],
-                }).map((route) => route.key),
+        allowedRouteKeys,
     }
 
     return {

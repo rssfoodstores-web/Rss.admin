@@ -9,6 +9,7 @@ import {
     Bike,
     Bell,
     MessageSquare,
+    MessageCircleMore,
     MapPin,
     Wallet,
     Settings,
@@ -73,6 +74,12 @@ const navItems: NavItem[] = [
         title: "Messages",
         href: "/dashboard/messages",
         icon: MessageSquare,
+    },
+    {
+        key: "whatsapp_center",
+        title: "WhatsApp Center",
+        href: "/dashboard/whatsapp",
+        icon: MessageCircleMore,
     },
     {
         key: "reports",
