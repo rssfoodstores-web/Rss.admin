@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import {
     Activity,
     CheckCircle2,
     ContactRound,
+    FileSpreadsheet,
     KeyRound,
     LayoutDashboard,
     Loader2,
@@ -30,7 +31,6 @@ import {
     saveWhatsAppContact,
     saveWhatsAppTemplate,
     sendQuickWhatsAppMessage,
-    sendWhatsAppCampaign,
     submitWhatsAppTemplate,
     syncRssCustomers,
     syncWhatsAppTemplateStatuses,
@@ -38,14 +38,16 @@ import {
     type WhatsAppCenterPageData,
     type WhatsAppTeamRecord,
 } from "./actions"
+import { CsvCampaignWorkspace } from "./CsvCampaignWorkspace"
 
-type TabKey = "campaigns" | "contacts" | "home" | "send" | "settings" | "templates"
+type TabKey = "builder" | "campaigns" | "contacts" | "home" | "send" | "settings" | "templates"
 
 const tabs: Array<{ icon: typeof LayoutDashboard; key: TabKey; label: string }> = [
     { icon: LayoutDashboard, key: "home", label: "Home" },
     { icon: Send, key: "send", label: "Send message" },
     { icon: Sparkles, key: "templates", label: "Templates" },
     { icon: ContactRound, key: "contacts", label: "Customers" },
+    { icon: FileSpreadsheet, key: "builder", label: "CSV Builder" },
     { icon: Activity, key: "campaigns", label: "Campaigns" },
     { icon: Settings2, key: "settings", label: "Team & settings" },
 ]
@@ -206,30 +208,13 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
         wabaId: initialData.connection?.wabaId ?? "",
     })
     const [testPhone, setTestPhone] = useState("")
-    const [selectedContactIds, setSelectedContactIds] = useState<string[]>([])
-    const approvedTemplates = initialData.templates.filter((template) => template.status === "approved")
-    const [campaignForm, setCampaignForm] = useState({
-        name: "",
-        templateId: approvedTemplates[0]?.id ?? "",
-        variableDefaults: {} as Record<string, string>,
-    })
-    const selectedTemplate = useMemo(
-        () => initialData.templates.find((template) => template.id === campaignForm.templateId) ?? null,
-        [campaignForm.templateId, initialData.templates]
-    )
     const visibleTabs = tabs.filter((tab) => {
         if (tab.key === "settings") return initialData.access.canManageSettings
         if (tab.key === "templates") return initialData.access.canManageTemplates
         if (tab.key === "contacts") return initialData.access.canManageContacts
-        if (tab.key === "campaigns") return initialData.access.canSendCampaigns
+        if (tab.key === "campaigns" || tab.key === "builder") return initialData.access.canSendCampaigns
         return true
     })
-
-    function toggleCampaignContact(contactId: string) {
-        setSelectedContactIds((current) => current.includes(contactId)
-            ? current.filter((id) => id !== contactId)
-            : [...current, contactId])
-    }
 
     return (
         <div className="space-y-6">
@@ -370,12 +355,9 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 </div>
             ) : null}
 
-            {activeTab === "campaigns" ? (
-                <div className="grid gap-6 xl:grid-cols-[1fr_1fr]">
-                    <SectionCard><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Guided broadcast</p><h2 className="mt-2 text-2xl font-black">Send a campaign</h2><div className="mt-6 space-y-4"><label className="block space-y-2"><span className="text-sm font-bold">1. Campaign name</span><Input value={campaignForm.name} onChange={(event) => setCampaignForm((current) => ({ ...current, name: event.target.value }))} placeholder="September order update" /></label><label className="block space-y-2"><span className="text-sm font-bold">2. Approved template</span><select value={campaignForm.templateId} onChange={(event) => setCampaignForm((current) => ({ ...current, templateId: event.target.value, variableDefaults: {} }))} className="h-11 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 dark:border-zinc-700 dark:bg-zinc-800"><option value="">Choose template</option>{approvedTemplates.map((template) => <option key={template.id} value={template.id}>{template.displayName}</option>)}</select></label>{selectedTemplate?.variables.map((variable) => <label key={variable.name} className="block space-y-2"><span className="text-sm font-bold">Default {variable.name.replace(/_/g, " ")}</span><Input value={campaignForm.variableDefaults[variable.name] ?? ""} onChange={(event) => setCampaignForm((current) => ({ ...current, variableDefaults: { ...current.variableDefaults, [variable.name]: event.target.value } }))} placeholder={variable.name === "customer_name" ? "Filled automatically for each customer" : variable.example} /></label>)}<div className="rounded-xl bg-gray-50 p-4 text-sm dark:bg-zinc-800"><p className="font-bold">3. Recipients selected: {selectedContactIds.length}</p><p className="mt-1 text-xs text-gray-500">Maximum 50 per send. Only active, consented contacts are accepted.</p></div><Button disabled={isPending || !initialData.connection?.hasMetaToken} className="h-12 w-full bg-[#25D366] font-bold text-white hover:bg-[#20bd5a]" onClick={() => { if (window.confirm(`Send this approved template to ${selectedContactIds.length} selected customers?`)) runAction(() => sendWhatsAppCampaign({ contactIds: selectedContactIds, name: campaignForm.name, templateId: campaignForm.templateId, variableDefaults: campaignForm.variableDefaults }), "Campaign processed. Check the report for results.", router, startTransition) }}><Send className="mr-2 h-4 w-4" />Send campaign</Button></div></SectionCard>
-                    <div className="space-y-6"><SectionCard><h2 className="text-xl font-black">Choose customers</h2><div className="mt-4 max-h-80 overflow-auto divide-y divide-gray-100 dark:divide-zinc-800">{initialData.contacts.filter((contact) => contact.optedIn && contact.isActive).map((contact) => <label key={contact.id} className="flex cursor-pointer items-center gap-3 py-3"><input type="checkbox" checked={selectedContactIds.includes(contact.id)} onChange={() => toggleCampaignContact(contact.id)} /><div><p className="font-semibold">{contact.fullName}</p><p className="text-xs text-gray-500">{contact.phone}</p></div></label>)}</div></SectionCard><SectionCard><h2 className="text-xl font-black">Campaign reports</h2><div className="mt-4 space-y-3">{initialData.campaigns.length ? initialData.campaigns.map((campaign) => <div key={campaign.id} className="rounded-2xl border border-gray-100 p-4 dark:border-zinc-800"><div className="flex justify-between gap-3"><div><p className="font-bold">{campaign.name}</p><p className="text-xs text-gray-500">{campaign.templateName ?? "Template removed"}</p></div><StatusBadge status={campaign.status} /></div><div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs"><div><strong className="block text-lg">{campaign.recipientCount}</strong>Recipients</div><div><strong className="block text-lg text-emerald-600">{campaign.sentCount}</strong>Sent</div><div><strong className="block text-lg text-red-600">{campaign.failedCount}</strong>Failed</div></div></div>) : <p className="py-8 text-center text-sm text-gray-500">No campaigns yet.</p>}</div></SectionCard></div>
-                </div>
-            ) : null}
+            {activeTab === "builder" ? <CsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} /> : null}
+
+            {activeTab === "campaigns" ? <CsvCampaignWorkspace campaigns={initialData.campaigns} mode="campaign" templates={initialData.templates} /> : null}
 
             {activeTab === "settings" && initialData.access.canManageSettings ? (
                 <div className="space-y-6">
