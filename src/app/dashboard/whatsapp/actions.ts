@@ -120,9 +120,9 @@ export interface CsvAudienceRow {
     orderId: string
     orderStatus: string
     phone: string
-    registrationMethod: "email" | "phone" | "unknown"
+    registrationMethod: "admin" | "email" | "google" | "phone" | "unknown"
     roles: string[]
-    source: "dashboard" | "rss"
+    source: "admin" | "dashboard" | "rss"
     state: string
 }
 
@@ -766,9 +766,20 @@ export async function loadCsvBuilderAudience(): Promise<{ error?: string; rows?:
             const { data, error } = await context.adminSupabase.auth.admin.listUsers({ page, perPage: 1000 })
             if (error) return { error: error.message }
             for (const user of data.users) {
+                const provider = typeof user.app_metadata?.provider === "string" ? user.app_metadata.provider : ""
+                const providers = Array.isArray(user.app_metadata?.providers) ? user.app_metadata.providers : []
+                const creationMethod = typeof user.app_metadata?.creation_method === "string" ? user.app_metadata.creation_method : ""
                 authById.set(user.id, {
                     email: user.email ?? "",
-                    registrationMethod: user.phone_confirmed_at ? "phone" : user.email_confirmed_at ? "email" : "unknown",
+                    registrationMethod: creationMethod === "admin_password_account"
+                        ? "admin"
+                        : provider === "google" || providers.includes("google") || user.identities?.some((identity) => identity.provider === "google")
+                            ? "google"
+                            : user.phone_confirmed_at
+                                ? "phone"
+                                : user.email_confirmed_at
+                                    ? "email"
+                                    : "unknown",
                 })
             }
             if (data.users.length < 1000) break
@@ -795,7 +806,7 @@ export async function loadCsvBuilderAudience(): Promise<{ error?: string; rows?:
                 phone: normalizeWhatsAppPhone(contact?.phone ?? profile.phone ?? "") ?? "",
                 registrationMethod: auth?.registrationMethod ?? "unknown",
                 roles: rolesByUser.get(profile.id) ?? [],
-                source: "rss",
+                source: auth?.registrationMethod === "admin" ? "admin" : "rss",
                 state: profile.state ?? "",
             }
         })

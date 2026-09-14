@@ -71,13 +71,21 @@ function databaseFields(row: CsvAudienceRow): Record<string, string> {
         phone: row.phone,
         registration_method: row.registrationMethod,
         roles: row.roles.join(", "),
-        source: row.source === "rss" ? "Registered on RSS" : "Added in dashboard",
+        source: row.source === "rss" ? "Registered on RSS" : row.source === "admin" ? "Added on Add User page" : "Added in WhatsApp dashboard",
         state: row.state,
     }
 }
 
 function Step({ active, done, number, text }: { active: boolean; done: boolean; number: number; text: string }) {
     return <div className={cn("flex items-center gap-2 rounded-full px-3 py-2 text-xs font-bold", active ? "bg-[#128C7E] text-white" : done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400 dark:bg-zinc-800")}><span>{done ? "✓" : number}</span><span>{text}</span></div>
+}
+
+function HelpTip({ children, text }: { children: React.ReactNode; text: string }) {
+    return <span className="group relative inline-flex items-center">
+        {children}
+        <button type="button" aria-label="Show explanation" className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-700">?</button>
+        <span role="tooltip" className="pointer-events-none absolute left-0 top-7 z-30 hidden w-72 rounded-xl bg-zinc-950 p-3 text-xs font-normal leading-5 text-white shadow-xl group-hover:block group-focus-within:block">{text}</span>
+    </span>
 }
 
 export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns: WhatsAppCampaignRecord[]; mode: "builder" | "campaign"; templates: WhatsAppTemplateRecord[] }) {
@@ -90,8 +98,8 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
     const [uploadPhoneColumn, setUploadPhoneColumn] = useState("")
     const [uploadConsent, setUploadConsent] = useState(false)
     const [selectedRoles, setSelectedRoles] = useState<string[]>(["customer"])
-    const [origin, setOrigin] = useState<"all" | "dashboard" | "rss">("all")
-    const [registration, setRegistration] = useState<"all" | "email" | "phone">("all")
+    const [origin, setOrigin] = useState<"admin" | "all" | "dashboard" | "rss">("all")
+    const [registration, setRegistration] = useState<"admin" | "all" | "email" | "google" | "phone">("all")
     const [requirements, setRequirements] = useState({ consent: false, email: false, name: true, order: false, phone: true })
     const [selectedColumns, setSelectedColumns] = useState(["full_name", "phone", "email", "roles", "order_number", "order_status"])
     const [audienceName, setAudienceName] = useState("")
@@ -190,7 +198,10 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
                     {!databaseRows.length ? <Button className="h-12 bg-[#128C7E]" disabled={isPending} onClick={loadDatabase}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}Show me the people in RSS</Button> : null}
                     {databaseRows.length ? <>
                         <div><p className="font-bold">Choose their role</p><div className="mt-3 flex flex-wrap gap-2">{roles.map((role) => <button type="button" key={role} onClick={() => setSelectedRoles((current) => current.includes(role) ? current.filter((item) => item !== role) : [...current, role])} className={cn("rounded-full border px-4 py-2 text-sm capitalize", selectedRoles.includes(role) ? "border-[#128C7E] bg-[#128C7E] text-white" : "border-gray-200")}>{role.replace("_", " ")}</button>)}</div></div>
-                        <div className="grid gap-4 md:grid-cols-2"><label className="space-y-2"><span className="font-bold">Where were they added?</span><select className="h-11 w-full rounded-xl border bg-background px-3" value={origin} onChange={(event) => setOrigin(event.target.value as typeof origin)}><option value="all">Anywhere</option><option value="rss">Registered on RSS</option><option value="dashboard">Added in WhatsApp dashboard</option></select></label><label className="space-y-2"><span className="font-bold">How did they register?</span><select className="h-11 w-full rounded-xl border bg-background px-3" value={registration} onChange={(event) => setRegistration(event.target.value as typeof registration)}><option value="all">Any method</option><option value="phone">Verified phone number</option><option value="email">Verified email</option></select></label></div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <label className="space-y-2"><HelpTip text="Anywhere combines all sources. Registered on RSS means the person created an account. Add User means an administrator created the account for them. WhatsApp dashboard means they were entered only in the Contact Book."><span className="font-bold">Where were they added?</span></HelpTip><select title="Choose where these people came from" className="h-11 w-full rounded-xl border bg-background px-3" value={origin} onChange={(event) => setOrigin(event.target.value as typeof origin)}><option value="all">Anywhere</option><option value="rss">Registered on RSS</option><option value="admin">Added on Add User page</option><option value="dashboard">Added in WhatsApp dashboard</option></select></label>
+                            <label className="space-y-2"><HelpTip text="This shows the account's original sign-up method. Google means Sign in with Google. Phone-confirmed and email-confirmed mean the person verified that method themselves. Add User accounts were created by an administrator, so they are kept separate even when Supabase marks their identifier confirmed."><span className="font-bold">How was their account created?</span></HelpTip><select title="Choose the original account creation method" className="h-11 w-full rounded-xl border bg-background px-3" value={registration} onChange={(event) => setRegistration(event.target.value as typeof registration)}><option value="all">Any method</option><option value="google">Signed in with Google</option><option value="phone">Phone-confirmed account</option><option value="email">Email-confirmed account</option><option value="admin">Added on Add User page</option></select></label>
+                        </div>
                         <details className="rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800"><summary className="cursor-pointer font-bold">More choices</summary><div className="mt-4 grid gap-3 sm:grid-cols-2">{Object.entries({ consent: "Only show people with WhatsApp consent", email: "Only show people with an email", name: "Only show people with a name", order: "Only show people with an order", phone: "Only show people with a phone number" }).map(([key, text]) => <label key={key} className="flex items-center gap-3"><input type="checkbox" checked={requirements[key as keyof typeof requirements]} onChange={(event) => setRequirements((current) => ({ ...current, [key]: event.target.checked }))} />{text}</label>)}</div><p className="mt-4 text-xs text-gray-500">You can include everyone while building the CSV. People without WhatsApp consent will still be left out when sending.</p></details>
                     </> : null}
                 </div> : <div className="mt-7 space-y-5">
