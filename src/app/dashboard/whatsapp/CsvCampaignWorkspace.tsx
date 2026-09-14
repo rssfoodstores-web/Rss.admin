@@ -80,12 +80,35 @@ function Step({ active, done, number, text }: { active: boolean; done: boolean; 
     return <div className={cn("flex items-center gap-2 rounded-full px-3 py-2 text-xs font-bold", active ? "bg-[#128C7E] text-white" : done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-400 dark:bg-zinc-800")}><span>{done ? "✓" : number}</span><span>{text}</span></div>
 }
 
-function HelpTip({ children, text }: { children: React.ReactNode; text: string }) {
-    return <span className="group relative inline-flex items-center">
-        {children}
-        <button type="button" aria-label="Show explanation" className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-700">?</button>
-        <span role="tooltip" className="pointer-events-none absolute left-0 top-7 z-30 hidden w-72 rounded-xl bg-zinc-950 p-3 text-xs font-normal leading-5 text-white shadow-xl group-hover:block group-focus-within:block">{text}</span>
-    </span>
+function ExplainedSelect<T extends string>({ label: selectLabel, onChange, options, value }: {
+    label: string
+    onChange: (value: T) => void
+    options: Array<{ description: string; label: string; value: T }>
+    value: T
+}) {
+    const selected = options.find((option) => option.value === value) ?? options[0]
+    return <label className="block space-y-2">
+        <span className="font-bold">{selectLabel}</span>
+        <details className="group/select relative">
+            <summary className="flex h-11 cursor-pointer list-none items-center justify-between rounded-xl border bg-background px-3 [&::-webkit-details-marker]:hidden">
+                <span>{selected?.label}</span><span aria-hidden className="text-gray-500 transition group-open/select:rotate-180">⌄</span>
+            </summary>
+            <div className="absolute left-0 top-12 z-40 w-full min-w-72 rounded-xl border bg-white p-1 shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+                {options.map((option) => <div className="group/option relative" key={option.value}>
+                    <button
+                        type="button"
+                        title={option.description}
+                        className={cn("w-full rounded-lg px-3 py-2.5 text-left text-sm hover:bg-emerald-50 focus:bg-emerald-50 focus:outline-none dark:hover:bg-emerald-950/30", option.value === value && "bg-emerald-50 font-bold text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200")}
+                        onClick={(event) => {
+                            onChange(option.value)
+                            event.currentTarget.closest("details")?.removeAttribute("open")
+                        }}
+                    >{option.label}</button>
+                    <span role="tooltip" className="pointer-events-none absolute left-4 top-full z-50 hidden w-[min(22rem,calc(100vw-4rem))] rounded-xl bg-zinc-950 p-3 text-xs font-normal leading-5 text-white shadow-xl group-hover/option:block group-focus-within/option:block">{option.description}</span>
+                </div>)}
+            </div>
+        </details>
+    </label>
 }
 
 export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns: WhatsAppCampaignRecord[]; mode: "builder" | "campaign"; templates: WhatsAppTemplateRecord[] }) {
@@ -199,8 +222,19 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
                     {databaseRows.length ? <>
                         <div><p className="font-bold">Choose their role</p><div className="mt-3 flex flex-wrap gap-2">{roles.map((role) => <button type="button" key={role} onClick={() => setSelectedRoles((current) => current.includes(role) ? current.filter((item) => item !== role) : [...current, role])} className={cn("rounded-full border px-4 py-2 text-sm capitalize", selectedRoles.includes(role) ? "border-[#128C7E] bg-[#128C7E] text-white" : "border-gray-200")}>{role.replace("_", " ")}</button>)}</div></div>
                         <div className="grid gap-4 md:grid-cols-2">
-                            <label className="space-y-2"><HelpTip text="Anywhere combines all sources. Registered on RSS means the person created an account. Add User means an administrator created the account for them. WhatsApp dashboard means they were entered only in the Contact Book."><span className="font-bold">Where were they added?</span></HelpTip><select title="Choose where these people came from" className="h-11 w-full rounded-xl border bg-background px-3" value={origin} onChange={(event) => setOrigin(event.target.value as typeof origin)}><option value="all">Anywhere</option><option value="rss">Registered on RSS</option><option value="admin">Added on Add User page</option><option value="dashboard">Added in WhatsApp dashboard</option></select></label>
-                            <label className="space-y-2"><HelpTip text="This shows the account's original sign-up method. Google means Sign in with Google. Phone-confirmed and email-confirmed mean the person verified that method themselves. Add User accounts were created by an administrator, so they are kept separate even when Supabase marks their identifier confirmed."><span className="font-bold">How was their account created?</span></HelpTip><select title="Choose the original account creation method" className="h-11 w-full rounded-xl border bg-background px-3" value={registration} onChange={(event) => setRegistration(event.target.value as typeof registration)}><option value="all">Any method</option><option value="google">Signed in with Google</option><option value="phone">Phone-confirmed account</option><option value="email">Email-confirmed account</option><option value="admin">Added on Add User page</option></select></label>
+                            <ExplainedSelect label="Where were they added?" value={origin} onChange={setOrigin} options={[
+                                { value: "all", label: "Anywhere", description: "Shows everyone from RSS accounts, the Add User page and the WhatsApp Contact Book." },
+                                { value: "rss", label: "Registered on RSS", description: "Shows people who created their own RSS account. Accounts created by an administrator are kept separate." },
+                                { value: "admin", label: "Added on Add User page", description: "Shows accounts that an administrator created for someone from the dashboard Add User page." },
+                                { value: "dashboard", label: "Added in WhatsApp dashboard", description: "Shows contacts entered manually in the WhatsApp Contact Book, even when they do not have an RSS account." },
+                            ]} />
+                            <ExplainedSelect label="How was their account created?" value={registration} onChange={setRegistration} options={[
+                                { value: "all", label: "Any method", description: "Does not filter by account creation method. All matching account types are included." },
+                                { value: "google", label: "Signed in with Google", description: "Shows people whose RSS account was created using the Sign in with Google button." },
+                                { value: "phone", label: "Phone-confirmed account", description: "Shows people who created an account and confirmed their own phone number. This is not the same as WhatsApp consent." },
+                                { value: "email", label: "Email-confirmed account", description: "Shows people who created an account and confirmed their own email address." },
+                                { value: "admin", label: "Added on Add User page", description: "Shows accounts created by an administrator. They are not counted as self-confirmed phone or email accounts." },
+                            ]} />
                         </div>
                         <details className="rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800"><summary className="cursor-pointer font-bold">More choices</summary><div className="mt-4 grid gap-3 sm:grid-cols-2">{Object.entries({ consent: "Only show people with WhatsApp consent", email: "Only show people with an email", name: "Only show people with a name", order: "Only show people with an order", phone: "Only show people with a phone number" }).map(([key, text]) => <label key={key} className="flex items-center gap-3"><input type="checkbox" checked={requirements[key as keyof typeof requirements]} onChange={(event) => setRequirements((current) => ({ ...current, [key]: event.target.checked }))} />{text}</label>)}</div><p className="mt-4 text-xs text-gray-500">You can include everyone while building the CSV. People without WhatsApp consent will still be left out when sending.</p></details>
                     </> : null}
