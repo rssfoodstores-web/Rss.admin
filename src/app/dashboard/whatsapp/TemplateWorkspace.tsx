@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2, Clock3, Loader2, Plus, RefreshCw, ShieldCheck, Sparkles } from "lucide-react"
 import { toast } from "sonner"
@@ -37,12 +37,15 @@ function suggestedCategory(body: string): Category | null {
     return null
 }
 
-function formatElapsed(value: string | null) {
+function formatElapsed(value: string | null, now: number) {
     if (!value) return { hours: 0, label: "Waiting for submission time" }
-    const totalMinutes = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60000))
-    const hours = Math.floor(totalMinutes / 60)
-    const minutes = totalMinutes % 60
-    return { hours: totalMinutes / 60, label: hours ? `${hours}h ${minutes}m` : `${minutes} minutes` }
+    const totalSeconds = Math.max(0, Math.floor((now - new Date(value).getTime()) / 1000))
+    const days = Math.floor(totalSeconds / 86400)
+    const hours = Math.floor((totalSeconds % 86400) / 3600)
+    const minutes = Math.floor((totalSeconds % 3600) / 60)
+    const seconds = totalSeconds % 60
+    const clock = [hours, minutes, seconds].map((part) => String(part).padStart(2, "0")).join(":")
+    return { hours: totalSeconds / 3600, label: days ? `${days}d ${clock}` : clock }
 }
 
 function statusCopy(status: WhatsAppTemplateRecord["status"]) {
@@ -57,12 +60,18 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [isSyncing, setIsSyncing] = useState(false)
+    const [now, setNow] = useState(() => Date.now())
     const [form, setForm] = useState({ body: "", category: "utility" as Category, displayName: "", language: "en_US", name: "" })
     const [customVariable, setCustomVariable] = useState("")
     const [expandedTemplateIds, setExpandedTemplateIds] = useState<string[]>([])
     const suggestion = suggestedCategory(form.body)
     const mismatch = suggestion && suggestion !== form.category
     const preview = useMemo(() => form.body.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g, (_, name: string) => variables.find(([key]) => key === name)?.[2] ?? `Sample ${name.replace(/_/g, " ")}`), [form.body])
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 1000)
+        return () => window.clearInterval(timer)
+    }, [])
 
     function act(action: () => Promise<{ error?: string; success?: true }>, success: string) {
         startTransition(() => void action().then((result) => {
@@ -119,7 +128,7 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
         <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Your templates</h2><p className="text-sm text-gray-500">Every status explains what it means and what to do next.</p></div><Button variant="outline" aria-busy={isSyncing} disabled={isSyncing || isPending || !canSync} onClick={() => void checkWithMeta()}>{isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}<span aria-live="polite">{isSyncing ? "Checking Meta…" : "Check with Meta"}</span></Button></div>
             <div className="mt-5 space-y-4">{templates.length ? templates.map((template) => {
-                const elapsed = formatElapsed(template.submittedAt)
+                const elapsed = formatElapsed(template.submittedAt, now)
                 const noProblem = !template.rejectionReason || template.rejectionReason.toUpperCase() === "NONE"
                 const progress = template.status === "pending" ? Math.min(95, Math.max(4, (elapsed.hours / 24) * 100)) : template.status === "approved" ? 100 : 0
                 const isDraft = template.status === "draft"
