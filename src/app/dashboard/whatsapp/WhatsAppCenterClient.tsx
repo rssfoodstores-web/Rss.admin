@@ -12,7 +12,6 @@ import {
     Loader2,
     MessageCircleMore,
     RefreshCw,
-    Send,
     Settings2,
     ShieldCheck,
     Sparkles,
@@ -22,18 +21,17 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import {
     saveWhatsAppAccess,
     saveWhatsAppConnection,
     saveWhatsAppContact,
-    sendQuickWhatsAppMessage,
     syncRssCustomers,
     testSavedWhatsAppConnection,
     type WhatsAppCenterPageData,
     type WhatsAppTeamRecord,
 } from "./actions"
+import { ChatWorkspace } from "./ChatWorkspace"
 import { CsvCampaignWorkspace } from "./CsvCampaignWorkspace"
 import { TemplateWorkspace } from "./TemplateWorkspace"
 
@@ -41,7 +39,7 @@ type TabKey = "builder" | "campaigns" | "contacts" | "home" | "send" | "settings
 
 const tabs: Array<{ icon: typeof LayoutDashboard; key: TabKey; label: string }> = [
     { icon: LayoutDashboard, key: "home", label: "Home" },
-    { icon: Send, key: "send", label: "Send message" },
+    { icon: MessageCircleMore, key: "send", label: "Chat with customers" },
     { icon: Sparkles, key: "templates", label: "Templates" },
     { icon: ContactRound, key: "contacts", label: "Customers" },
     { icon: FileSpreadsheet, key: "builder", label: "CSV Builder" },
@@ -187,7 +185,6 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
     const [isPending, startTransition] = useTransition()
     const [activeTab, setActiveTab] = useState<TabKey>(initialData.connection ? "home" : "settings")
     const [contactForm, setContactForm] = useState({ email: "", fullName: "", labels: "", optedIn: false, phone: "" })
-    const [quickMessage, setQuickMessage] = useState({ contactId: initialData.contacts[0]?.id ?? "", message: "" })
     const [connectionForm, setConnectionForm] = useState({
         accountLabel: initialData.connection?.accountLabel ?? "RSS Foods WhatsApp",
         apiToken: "",
@@ -287,7 +284,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                         <SectionCard>
                             <div className="flex items-center justify-between gap-4">
                                 <div><h2 className="text-xl font-black">Recent activity</h2><p className="mt-1 text-sm text-gray-500">Latest outgoing message results</p></div>
-                                <Button variant="outline" onClick={() => setActiveTab("send")}>Send message</Button>
+                                <Button variant="outline" onClick={() => setActiveTab("send")}>Open customer chats</Button>
                             </div>
                             <div className="mt-5 divide-y divide-gray-100 dark:divide-zinc-800">
                                 {initialData.messages.length ? initialData.messages.slice(0, 6).map((message) => (
@@ -302,21 +299,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 </div>
             ) : null}
 
-            {activeTab === "send" ? (
-                <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
-                    <SectionCard>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Simple reply</p>
-                        <h2 className="mt-2 text-2xl font-black">Send one message</h2>
-                        <p className="mt-2 text-sm text-gray-500">Use this only when the customer has messaged RSS within the last 24 hours. Otherwise use an approved template campaign.</p>
-                        <div className="mt-6 space-y-4">
-                            <label className="block space-y-2"><span className="text-sm font-bold">1. Choose customer</span><select value={quickMessage.contactId} onChange={(event) => setQuickMessage((current) => ({ ...current, contactId: event.target.value }))} className="h-12 w-full rounded-xl border border-gray-200 bg-gray-50 px-4 dark:border-zinc-700 dark:bg-zinc-800">{initialData.contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.fullName} · {contact.phone}</option>)}</select></label>
-                            <label className="block space-y-2"><span className="text-sm font-bold">2. Write message</span><Textarea value={quickMessage.message} onChange={(event) => setQuickMessage((current) => ({ ...current, message: event.target.value }))} className="min-h-36 rounded-2xl" placeholder="Hello Ada, how can we help?" maxLength={4000} /></label>
-                            <Button disabled={isPending || !initialData.connection} className="h-12 w-full rounded-xl bg-[#25D366] font-bold text-white hover:bg-[#20bd5a]" onClick={() => runAction(() => sendQuickWhatsAppMessage(quickMessage), "Message sent.", router, startTransition)}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}3. Send message</Button>
-                        </div>
-                    </SectionCard>
-                    <SectionCard><h2 className="text-xl font-black">Before sending</h2><div className="mt-5 space-y-3 text-sm text-gray-600 dark:text-zinc-300">{["The customer opened the 24-hour chat window.", "The number includes the country code.", "For promotions or announcements, use Campaigns instead.", "Every send is recorded in the RSS audit log."].map((item) => <div key={item} className="flex gap-3"><CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[#25D366]" /><span>{item}</span></div>)}</div></SectionCard>
-                </div>
-            ) : null}
+            {activeTab === "send" ? <ChatWorkspace data={initialData} /> : null}
 
             {activeTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
 
@@ -333,6 +316,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
 
             {activeTab === "settings" && initialData.access.canManageSettings ? (
                 <div className="space-y-6">
+                    {initialData.connection?.webhookUrl ? <SectionCard><p className="font-black text-emerald-950 dark:text-emerald-100">Receive customer replies in RSS</p><p className="mt-1 text-sm text-gray-500">Paste this URL into WhatChimp’s “Trigger Webhook for Incoming Message” setting. Click the box to select the complete URL.</p><Input className="mt-4" readOnly value={initialData.connection.webhookUrl} onFocus={(event) => event.currentTarget.select()} /></SectionCard> : null}
                     <SectionCard><div className="flex items-start gap-4"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-[#128C7E]"><KeyRound className="h-5 w-5" /></div><div><h2 className="text-2xl font-black">Connection settings</h2><p className="mt-1 text-sm text-gray-500">Only the Supa Admin can see this section. Saved tokens are encrypted and are never displayed again.</p></div></div><div className="mt-6 grid gap-4 md:grid-cols-2"><label className="space-y-2"><span className="text-sm font-bold">Account label</span><Input value={connectionForm.accountLabel} onChange={(event) => setConnectionForm((current) => ({ ...current, accountLabel: event.target.value }))} /></label><label className="space-y-2"><span className="text-sm font-bold">Phone number ID</span><Input value={connectionForm.phoneNumberId} onChange={(event) => setConnectionForm((current) => ({ ...current, phoneNumberId: event.target.value }))} /></label><label className="space-y-2"><span className="text-sm font-bold">WhatChimp API token</span><Input type="password" autoComplete="new-password" value={connectionForm.apiToken} onChange={(event) => setConnectionForm((current) => ({ ...current, apiToken: event.target.value }))} placeholder={initialData.connection?.hasApiToken ? "Saved securely — leave blank to keep" : "Paste token"} /></label><label className="space-y-2"><span className="text-sm font-bold">Meta WABA ID</span><Input value={connectionForm.wabaId} onChange={(event) => setConnectionForm((current) => ({ ...current, wabaId: event.target.value }))} placeholder="Needed for template submission" /></label><label className="space-y-2"><span className="text-sm font-bold">Meta access token</span><Input type="password" autoComplete="new-password" value={connectionForm.metaAccessToken} onChange={(event) => setConnectionForm((current) => ({ ...current, metaAccessToken: event.target.value }))} placeholder={initialData.connection?.hasMetaToken ? "Saved securely — leave blank to keep" : "Needed for templates and campaigns"} /></label><label className="space-y-2"><span className="text-sm font-bold">Graph API version</span><Input value={connectionForm.graphApiVersion} onChange={(event) => setConnectionForm((current) => ({ ...current, graphApiVersion: event.target.value }))} /></label><label className="flex items-center gap-3"><input type="checkbox" checked={connectionForm.isActive} onChange={(event) => setConnectionForm((current) => ({ ...current, isActive: event.target.checked }))} /><span className="text-sm font-bold">Connection active</span></label></div><div className="mt-6 flex flex-wrap gap-3"><Button disabled={isPending} className="bg-[#128C7E]" onClick={() => runAction(() => saveWhatsAppConnection(connectionForm), "Connection saved securely.", router, startTransition)}><ShieldCheck className="mr-2 h-4 w-4" />Save connection</Button><Input className="max-w-xs" value={testPhone} onChange={(event) => setTestPhone(event.target.value)} placeholder="Test phone with country code" /><Button variant="outline" disabled={isPending || !initialData.connection} onClick={() => runAction(() => testSavedWhatsAppConnection(testPhone), "WhatChimp connection verified.", router, startTransition)}><RefreshCw className="mr-2 h-4 w-4" />Test safely</Button></div>{initialData.connection?.lastTestStatus ? <div className="mt-4 flex items-center gap-3 text-sm"><StatusBadge status={initialData.connection.lastTestStatus} /><span className="text-gray-500">{initialData.connection.lastTestMessage}</span></div> : null}</SectionCard>
                     <SectionCard><div className="flex items-start gap-4"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600"><Users className="h-5 w-5" /></div><div><h2 className="text-2xl font-black">Who can use WhatsApp Center?</h2><p className="mt-1 text-sm text-gray-500">Supa Admin controls access. Managers receive all working permissions; operators can be limited.</p></div></div><div className="mt-5">{initialData.team.map((member) => <TeamAccessRow key={member.userId} member={member} />)}</div></SectionCard>
                 </div>

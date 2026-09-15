@@ -35,6 +35,8 @@ export interface WhatsAppConnectionSummary {
     lastTestedAt: string | null
     phoneNumberId: string
     wabaId: string
+    webhookSecret: string
+    webhookUrl: string
 }
 
 export interface WhatsAppContactRecord {
@@ -79,11 +81,20 @@ export interface WhatsAppCampaignRecord {
 export interface WhatsAppMessageRecord {
     body: string
     contactName: string | null
+    contactId: string
     createdAt: string
     direction: "inbound" | "outbound"
     errorMessage: string | null
     id: string
+    sentBy: string | null
     status: "delivered" | "failed" | "queued" | "read" | "received" | "sent"
+}
+
+export interface WhatsAppConversationAssignment {
+    assignedTo: string | null
+    assignedToName: string | null
+    contactId: string
+    status: "open" | "pending" | "resolved"
 }
 
 export interface WhatsAppTeamRecord {
@@ -101,6 +112,8 @@ export interface WhatsAppCenterPageData {
     campaigns: WhatsAppCampaignRecord[]
     connection: WhatsAppConnectionSummary | null
     contacts: WhatsAppContactRecord[]
+    conversationAssignments: WhatsAppConversationAssignment[]
+    currentUserId: string
     messages: WhatsAppMessageRecord[]
     stats: {
         activeContacts: number
@@ -257,16 +270,17 @@ function refreshWhatsAppCenter() {
 export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageData> {
     const context = await getWhatsAppContext()
     const admin = context.adminSupabase
-    const [connectionResult, contactsResult, templatesResult, campaignsResult, messagesResult, templateAuditResult] = await Promise.all([
-        admin.from("whatsapp_connections").select("account_label, graph_api_version, api_token_ciphertext, meta_access_token_ciphertext, is_active, last_test_message, last_test_status, last_tested_at, phone_number_id, waba_id").eq("id", "primary").maybeSingle(),
+    const [connectionResult, contactsResult, templatesResult, campaignsResult, messagesResult, templateAuditResult, assignmentsResult] = await Promise.all([
+        admin.from("whatsapp_connections").select("account_label, graph_api_version, api_token_ciphertext, meta_access_token_ciphertext, is_active, last_test_message, last_test_status, last_tested_at, phone_number_id, waba_id, webhook_secret").eq("id", "primary").maybeSingle(),
         admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active").order("updated_at", { ascending: false }).limit(250),
         admin.from("whatsapp_templates").select("id, name, display_name, category, language, body, variables, status, external_template_id, rejection_reason, created_at").order("updated_at", { ascending: false }).limit(100),
         admin.from("whatsapp_campaigns").select("id, name, status, recipient_count, sent_count, delivered_count, read_count, failed_count, created_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
-        admin.from("whatsapp_messages").select("id, body, direction, status, error_message, created_at, whatsapp_contacts(full_name)").order("created_at", { ascending: false }).limit(100),
+        admin.from("whatsapp_messages").select("id, contact_id, body, direction, status, error_message, sent_by, created_at, whatsapp_contacts(full_name)").order("created_at", { ascending: false }).limit(1000),
         admin.from("audit_logs").select("entity_id, created_at").eq("action", "submit_whatsapp_template").order("created_at", { ascending: true }).limit(500),
+        admin.from("whatsapp_conversation_assignments").select("contact_id, assigned_to, status"),
     ])
 
-    const firstError = [connectionResult.error, contactsResult.error, templatesResult.error, campaignsResult.error, messagesResult.error, templateAuditResult.error].find(Boolean)
+    const firstError = [connectionResult.error, contactsResult.error, templatesResult.error, campaignsResult.error, messagesResult.error, templateAuditResult.error, assignmentsResult.error].find(Boolean)
     if (firstError) {
         throw new Error(firstError.message)
     }
@@ -316,17 +330,19 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         const relation = Array.isArray(row.whatsapp_contacts) ? row.whatsapp_contacts[0] : row.whatsapp_contacts
         return {
             body: row.body,
+            contactId: row.contact_id,
             contactName: relation?.full_name ?? null,
             createdAt: row.created_at,
             direction: row.direction as WhatsAppMessageRecord["direction"],
             errorMessage: row.error_message ?? null,
             id: row.id,
+            sentBy: row.sent_by ?? null,
             status: row.status as WhatsAppMessageRecord["status"],
         }
     })
 
     let team: WhatsAppTeamRecord[] = []
-    if (context.access.primaryRole === "supa_admin") {
+    {
         const [{ data: roleRows }, { data: profileRows }, { data: grantRows }] = await Promise.all([
             admin.from("user_roles").select("user_id, role").in("role", ["admin", "sub_admin", "supa_admin"]),
             admin.from("profiles").select("id, full_name"),
@@ -350,6 +366,14 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         }).sort((left, right) => left.fullName.localeCompare(right.fullName))
     }
 
+    const teamNameById = new Map(team.map((member) => [member.userId, member.fullName]))
+    const conversationAssignments = (assignmentsResult.data ?? []).map((row) => ({
+        assignedTo: row.assigned_to ?? null,
+        assignedToName: row.assigned_to ? teamNameById.get(row.assigned_to) ?? "Another administrator" : null,
+        contactId: row.contact_id,
+        status: row.status as WhatsAppConversationAssignment["status"],
+    }))
+
     return {
         access: context.whatsappAccess,
         campaigns,
@@ -364,8 +388,12 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
             lastTestedAt: connectionRow.last_tested_at ?? null,
             phoneNumberId: connectionRow.phone_number_id,
             wabaId: connectionRow.waba_id ?? "",
+            webhookSecret: connectionRow.webhook_secret,
+            webhookUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")}/api/webhooks/whatchimp?key=${connectionRow.webhook_secret}`,
         } : null,
         contacts,
+        conversationAssignments,
+        currentUserId: context.access.user.id,
         messages,
         stats: {
             activeContacts: contacts.filter((contact) => contact.isActive).length,
@@ -739,6 +767,70 @@ export async function sendQuickWhatsAppMessage(input: {
         return { success: true }
     } catch (error) {
         return { error: error instanceof Error ? error.message : "Unable to send the message." }
+    }
+}
+
+export async function sendSingleWhatsAppTemplate(input: {
+    contactId: string
+    templateId: string
+    values: Record<string, string>
+}): Promise<ActionResult> {
+    try {
+        const context = await requireCapability("messages")
+        const [{ data: contact, error: contactError }, { data: template, error: templateError }] = await Promise.all([
+            context.adminSupabase.from("whatsapp_contacts").select("id, phone, full_name").eq("id", input.contactId).single(),
+            context.adminSupabase.from("whatsapp_templates").select("id, name, language, body, variables, status").eq("id", input.templateId).single(),
+        ])
+        if (contactError || !contact) return { error: contactError?.message ?? "Customer not found." }
+        if (templateError || !template) return { error: templateError?.message ?? "Template not found." }
+        if (template.status !== "approved") return { error: "Choose a Meta-approved template." }
+
+        const variables = toVariables(template.variables)
+        const values = variables.map((variable) => input.values[variable.name]?.trim() ?? "")
+        const missing = variables.find((variable, index) => !values[index])
+        if (missing) return { error: `Enter ${missing.name.replace(/_/g, " ")} before sending.` }
+
+        const externalMessageId = await sendMetaTemplateMessage({ language: template.language, name: template.name, phone: contact.phone, values })
+        const body = renderTemplate(template.body, Object.fromEntries(variables.map((variable, index) => [variable.name, values[index]])))
+        const { error: logError } = await context.adminSupabase.from("whatsapp_messages").insert({
+            body,
+            contact_id: contact.id,
+            direction: "outbound",
+            external_message_id: externalMessageId,
+            message_type: "template",
+            metadata: { template_id: template.id, template_name: template.name },
+            sent_by: context.access.user.id,
+            status: "sent",
+        })
+        if (logError) return { error: `Template sent, but the RSS log failed: ${logError.message}` }
+        await writeAudit(context, "send_whatsapp_chat_template", "whatsapp_contact", contact.id, { template_id: template.id })
+        refreshWhatsAppCenter()
+        return { success: true }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unable to send the template." }
+    }
+}
+
+export async function assignWhatsAppConversation(input: {
+    assigneeId: string | null
+    contactId: string
+    status?: "open" | "pending" | "resolved"
+}): Promise<ActionResult> {
+    try {
+        const context = await requireCapability("messages")
+        const { error } = await context.adminSupabase.from("whatsapp_conversation_assignments").upsert({
+            assigned_at: input.assigneeId ? new Date().toISOString() : null,
+            assigned_to: input.assigneeId,
+            contact_id: input.contactId,
+            status: input.status ?? "open",
+            updated_at: new Date().toISOString(),
+        })
+        if (error) return { error: error.message }
+        await writeAudit(context, "assign_whatsapp_conversation", "whatsapp_contact", input.contactId, { assigned_to: input.assigneeId, status: input.status ?? "open" })
+        refreshWhatsAppCenter()
+        return { success: true }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Unable to update this conversation." }
     }
 }
 
