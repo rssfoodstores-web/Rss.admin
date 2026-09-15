@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, CheckCircle2, Clock3, Plus, RefreshCw, ShieldCheck, Sparkles } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Clock3, Loader2, Plus, RefreshCw, ShieldCheck, Sparkles } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,6 +56,7 @@ function statusCopy(status: WhatsAppTemplateRecord["status"]) {
 export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; templates: WhatsAppTemplateRecord[] }) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
+    const [isSyncing, setIsSyncing] = useState(false)
     const [form, setForm] = useState({ body: "", category: "utility" as Category, displayName: "", language: "en_US", name: "" })
     const [customVariable, setCustomVariable] = useState("")
     const [expandedTemplateIds, setExpandedTemplateIds] = useState<string[]>([])
@@ -83,6 +84,20 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
         toast.success(`${name.replace(/_/g, " ")} added to the message.`)
     }
 
+    async function checkWithMeta() {
+        setIsSyncing(true)
+        try {
+            const result = await syncWhatsAppTemplateStatuses()
+            if (result.error) return toast.error(result.error)
+            toast.success("Latest statuses received from Meta.")
+            router.refresh()
+        } catch {
+            toast.error("Could not check Meta right now.")
+        } finally {
+            setIsSyncing(false)
+        }
+    }
+
     return <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
         <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Easy template builder</p>
@@ -102,7 +117,7 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
         </section>
 
         <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Your templates</h2><p className="text-sm text-gray-500">Every status explains what it means and what to do next.</p></div><Button variant="outline" disabled={isPending || !canSync} onClick={() => act(syncWhatsAppTemplateStatuses, "Latest statuses received from Meta.")}><RefreshCw className="mr-2 h-4 w-4" />Check with Meta</Button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Your templates</h2><p className="text-sm text-gray-500">Every status explains what it means and what to do next.</p></div><Button variant="outline" aria-busy={isSyncing} disabled={isSyncing || isPending || !canSync} onClick={() => void checkWithMeta()}>{isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}<span aria-live="polite">{isSyncing ? "Checking Meta…" : "Check with Meta"}</span></Button></div>
             <div className="mt-5 space-y-4">{templates.length ? templates.map((template) => {
                 const elapsed = formatElapsed(template.submittedAt)
                 const noProblem = !template.rejectionReason || template.rejectionReason.toUpperCase() === "NONE"
