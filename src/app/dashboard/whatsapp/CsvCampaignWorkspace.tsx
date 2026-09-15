@@ -125,6 +125,7 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
     const [registration, setRegistration] = useState<"admin" | "all" | "email" | "google" | "phone">("all")
     const [requirements, setRequirements] = useState({ consent: false, email: false, name: true, order: false, phone: true })
     const [selectedColumns, setSelectedColumns] = useState(["full_name", "phone", "email", "roles", "order_number", "order_status"])
+    const [searchQuery, setSearchQuery] = useState("")
     const [audienceName, setAudienceName] = useState("")
     const [campaignName, setCampaignName] = useState("")
     const approved = templates.filter((template) => template.status === "approved")
@@ -154,6 +155,17 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
     const currentRows: AudienceRow[] = source === "database"
         ? filteredDatabase.map((row) => ({ consent: row.optedIn, fields: databaseFields(row), phone: row.phone }))
         : uploadRows.map((fields) => ({ consent: uploadConsent, fields, phone: fields[uploadPhoneColumn] ?? "" }))
+    const searchedRows = useMemo(() => {
+        const query = searchQuery.trim().toLowerCase()
+        if (!query) return currentRows
+        const digits = query.replace(/\D/g, "")
+        return currentRows.filter((row) => {
+            const textMatch = [row.fields.full_name, row.fields.email, row.phone]
+                .some((value) => value?.toLowerCase().includes(query))
+            const phoneMatch = digits.length > 0 && row.phone.replace(/\D/g, "").includes(digits)
+            return textMatch || phoneMatch
+        })
+    }, [currentRows, searchQuery])
     const availableColumns = source === "database" ? Object.keys(friendly).filter((key) => key !== "opted_in") : uploadColumns
     const selectedAudience = saved.find((audience) => audience.id === audienceId)
     const selectedTemplate = approved.find((template) => template.id === templateId)
@@ -185,10 +197,10 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
 
     function saveAudience() {
         if (!audienceName.trim()) return toast.error("Give this audience a name.")
-        if (!currentRows.length) return toast.error("No people match these choices.")
+        if (!searchedRows.length) return toast.error("No people match these choices and search.")
         if (source === "upload" && !uploadPhoneColumn) return toast.error("Choose the WhatsApp number column.")
         const columns = selectedColumns.filter((column) => availableColumns.includes(column))
-        const deduped = Array.from(new Map(currentRows.filter((row) => row.phone).map((row) => [row.phone.replace(/\D/g, ""), { ...row, fields: Object.fromEntries(columns.map((column) => [column, row.fields[column] ?? ""])) }])).values())
+        const deduped = Array.from(new Map(searchedRows.filter((row) => row.phone).map((row) => [row.phone.replace(/\D/g, ""), { ...row, fields: Object.fromEntries(columns.map((column) => [column, row.fields[column] ?? ""])) }])).values())
         const audience: SavedAudience = { columns, createdAt: new Date().toISOString(), id: crypto.randomUUID(), name: audienceName.trim(), rows: deduped, source }
         persist([audience, ...saved].slice(0, 20))
         setAudienceId(audience.id)
@@ -197,7 +209,7 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
 
     function downloadAudience() {
         const columns = selectedColumns.filter((column) => availableColumns.includes(column))
-        const content = [columns, ...currentRows.map((row) => columns.map((column) => row.fields[column] ?? ""))].map((row) => row.map(csvEscape).join(",")).join("\n")
+        const content = [columns, ...searchedRows.map((row) => columns.map((column) => row.fields[column] ?? ""))].map((row) => row.map(csvEscape).join(",")).join("\n")
         const link = document.createElement("a")
         link.href = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }))
         link.download = `${audienceName.trim() || "rss-audience"}.csv`
@@ -244,7 +256,7 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
                 </div>}
             </section>
 
-            {currentRows.length ? <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Choose information</p><h2 className="mt-2 text-2xl font-black">{currentRows.length.toLocaleString()} people found</h2><p className="text-sm text-gray-500">Choose everything you may want to use in a template.</p></div><Badge className="bg-emerald-100 text-emerald-700">{currentRows.filter((row) => row.consent).length.toLocaleString()} allowed to message</Badge></div><div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{availableColumns.map((column) => <label key={column} className="flex items-center gap-3 rounded-xl border p-3"><input type="checkbox" checked={selectedColumns.includes(column)} onChange={(event) => setSelectedColumns((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))} /><span>{label(column)}</span></label>)}</div><div className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><Input value={audienceName} onChange={(event) => setAudienceName(event.target.value)} placeholder="Give this audience a name, e.g. Ready orders" /><Button variant="outline" onClick={downloadAudience}><Download className="mr-2 h-4 w-4" />Download CSV</Button><Button className="bg-[#128C7E]" onClick={saveAudience}>Save for campaigns</Button></div><div className="mt-6 overflow-x-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="bg-gray-50 dark:bg-zinc-800"><tr>{selectedColumns.slice(0, 5).map((column) => <th className="p-3" key={column}>{label(column)}</th>)}</tr></thead><tbody>{currentRows.slice(0, 5).map((row, index) => <tr className="border-t" key={index}>{selectedColumns.slice(0, 5).map((column) => <td className="max-w-48 truncate p-3" key={column}>{row.fields[column] || "—"}</td>)}</tr>)}</tbody></table></div></section> : null}
+            {currentRows.length ? <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Choose information</p><h2 className="mt-2 text-2xl font-black">{searchedRows.length.toLocaleString()} people found</h2><p className="text-sm text-gray-500">Choose everything you may want to use in a template.</p></div><Badge className="bg-emerald-100 text-emerald-700">{searchedRows.filter((row) => row.consent).length.toLocaleString()} allowed to message</Badge></div><label className="mt-6 block space-y-2"><span className="text-sm font-bold">Search these people</span><Input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Type a customer name, email or phone number" /><span className="text-xs text-gray-500">The table, downloaded CSV and saved audience will use these filtered results.</span></label><div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{availableColumns.map((column) => <label key={column} className="flex items-center gap-3 rounded-xl border p-3"><input type="checkbox" checked={selectedColumns.includes(column)} onChange={(event) => setSelectedColumns((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))} /><span>{label(column)}</span></label>)}</div><div className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><label className="space-y-2"><span className="text-sm font-bold">Audience name</span><Input value={audienceName} onChange={(event) => setAudienceName(event.target.value)} placeholder="Example: Ready orders" /></label><Button className="self-end" variant="outline" onClick={downloadAudience}><Download className="mr-2 h-4 w-4" />Download CSV</Button><Button className="self-end bg-[#128C7E]" onClick={saveAudience}>Save for campaigns</Button></div><div className="mt-6 overflow-x-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="bg-gray-50 dark:bg-zinc-800"><tr>{selectedColumns.slice(0, 5).map((column) => <th className="p-3" key={column}>{label(column)}</th>)}</tr></thead><tbody>{searchedRows.slice(0, 25).map((row, index) => <tr className="border-t" key={index}>{selectedColumns.slice(0, 5).map((column) => <td className="max-w-48 truncate p-3" key={column}>{row.fields[column] || "—"}</td>)}</tr>)}</tbody></table>{searchedRows.length === 0 ? <p className="p-8 text-center text-sm text-gray-500">No one matches that search.</p> : null}{searchedRows.length > 25 ? <p className="border-t p-3 text-center text-xs text-gray-500">Showing the first 25 of {searchedRows.length.toLocaleString()} matching people.</p> : null}</div></section> : null}
         </div>
     )
 
