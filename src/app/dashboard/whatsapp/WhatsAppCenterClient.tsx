@@ -11,7 +11,6 @@ import {
     LayoutDashboard,
     Loader2,
     MessageCircleMore,
-    Plus,
     RefreshCw,
     Send,
     Settings2,
@@ -29,16 +28,14 @@ import {
     saveWhatsAppAccess,
     saveWhatsAppConnection,
     saveWhatsAppContact,
-    saveWhatsAppTemplate,
     sendQuickWhatsAppMessage,
-    submitWhatsAppTemplate,
     syncRssCustomers,
-    syncWhatsAppTemplateStatuses,
     testSavedWhatsAppConnection,
     type WhatsAppCenterPageData,
     type WhatsAppTeamRecord,
 } from "./actions"
 import { CsvCampaignWorkspace } from "./CsvCampaignWorkspace"
+import { TemplateWorkspace } from "./TemplateWorkspace"
 
 type TabKey = "builder" | "campaigns" | "contacts" | "home" | "send" | "settings" | "templates"
 
@@ -190,13 +187,6 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
     const [isPending, startTransition] = useTransition()
     const [activeTab, setActiveTab] = useState<TabKey>(initialData.connection ? "home" : "settings")
     const [contactForm, setContactForm] = useState({ email: "", fullName: "", labels: "", optedIn: false, phone: "" })
-    const [templateForm, setTemplateForm] = useState({
-        body: "Hi {{customer_name}}, your RSS Foods order {{order_number}} is now ready.",
-        category: "utility" as "authentication" | "marketing" | "utility",
-        displayName: "Order ready",
-        language: "en_US",
-        name: "rss_order_ready",
-    })
     const [quickMessage, setQuickMessage] = useState({ contactId: initialData.contacts[0]?.id ?? "", message: "" })
     const [connectionForm, setConnectionForm] = useState({
         accountLabel: initialData.connection?.accountLabel ?? "RSS Foods WhatsApp",
@@ -328,25 +318,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 </div>
             ) : null}
 
-            {activeTab === "templates" ? (
-                <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
-                    <SectionCard>
-                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Friendly template builder</p><h2 className="mt-2 text-2xl font-black">Create a template</h2>
-                        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                            <label className="space-y-2"><span className="text-sm font-bold">Display name</span><Input value={templateForm.displayName} onChange={(event) => setTemplateForm((current) => ({ ...current, displayName: event.target.value }))} /></label>
-                            <label className="space-y-2"><span className="text-sm font-bold">Technical name</span><Input value={templateForm.name} onChange={(event) => setTemplateForm((current) => ({ ...current, name: event.target.value }))} /></label>
-                            <label className="space-y-2"><span className="text-sm font-bold">Purpose</span><select value={templateForm.category} onChange={(event) => setTemplateForm((current) => ({ ...current, category: event.target.value as typeof current.category }))} className="h-10 w-full rounded-md border border-input bg-background px-3"><option value="utility">Order/service update</option><option value="marketing">Promotion</option><option value="authentication">OTP/security</option></select></label>
-                            <label className="space-y-2"><span className="text-sm font-bold">Language</span><Input value={templateForm.language} onChange={(event) => setTemplateForm((current) => ({ ...current, language: event.target.value }))} /></label>
-                            <label className="space-y-2 sm:col-span-2"><span className="text-sm font-bold">Message</span><Textarea className="min-h-40" value={templateForm.body} onChange={(event) => setTemplateForm((current) => ({ ...current, body: event.target.value }))} /><p className="text-xs text-gray-500">Add variables with double braces: {"{{customer_name}}"}, {"{{order_number}}"}, {"{{amount}}"}.</p></label>
-                        </div>
-                        <Button disabled={isPending} className="mt-5 bg-[#128C7E] hover:bg-[#0e766c]" onClick={() => runAction(() => saveWhatsAppTemplate(templateForm), "Template saved as a draft.", router, startTransition)}><Plus className="mr-2 h-4 w-4" />Save template</Button>
-                    </SectionCard>
-                    <SectionCard>
-                        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-black">Your templates</h2><p className="text-sm text-gray-500">Draft, submit, then sync approval status.</p></div><Button variant="outline" disabled={isPending || !initialData.connection?.hasMetaToken} onClick={() => runAction(syncWhatsAppTemplateStatuses, "Template statuses synced.", router, startTransition)}><RefreshCw className="mr-2 h-4 w-4" />Sync Meta</Button></div>
-                        <div className="mt-5 space-y-4">{initialData.templates.length ? initialData.templates.map((template) => <div key={template.id} className="rounded-2xl border border-gray-100 p-4 dark:border-zinc-800"><div className="flex items-start justify-between gap-4"><div><p className="font-bold">{template.displayName}</p><p className="mt-1 font-mono text-xs text-gray-400">{template.name}</p></div><StatusBadge status={template.status} /></div><p className="mt-3 text-sm text-gray-600 dark:text-zinc-300">{template.body}</p><div className="mt-4 flex items-center justify-between gap-3"><span className="text-xs capitalize text-gray-500">{template.category} · {template.language} · {template.variables.length} variables</span>{template.status === "draft" ? <Button size="sm" disabled={isPending || !initialData.connection?.hasMetaToken} onClick={() => runAction(() => submitWhatsAppTemplate(template.id), "Template submitted to Meta.", router, startTransition)}>Submit</Button> : null}</div>{template.rejectionReason ? <p className="mt-3 text-xs text-red-600">{template.rejectionReason}</p> : null}</div>) : <p className="py-10 text-center text-sm text-gray-500">No templates yet.</p>}</div>
-                    </SectionCard>
-                </div>
-            ) : null}
+            {activeTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
 
             {activeTab === "contacts" ? (
                 <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">

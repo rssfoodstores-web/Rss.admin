@@ -59,6 +59,7 @@ export interface WhatsAppTemplateRecord {
     name: string
     rejectionReason: string | null
     status: "approved" | "draft" | "paused" | "pending" | "rejected"
+    submittedAt: string | null
     variables: WhatsAppTemplateVariable[]
 }
 
@@ -256,15 +257,16 @@ function refreshWhatsAppCenter() {
 export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageData> {
     const context = await getWhatsAppContext()
     const admin = context.adminSupabase
-    const [connectionResult, contactsResult, templatesResult, campaignsResult, messagesResult] = await Promise.all([
+    const [connectionResult, contactsResult, templatesResult, campaignsResult, messagesResult, templateAuditResult] = await Promise.all([
         admin.from("whatsapp_connections").select("account_label, graph_api_version, api_token_ciphertext, meta_access_token_ciphertext, is_active, last_test_message, last_test_status, last_tested_at, phone_number_id, waba_id").eq("id", "primary").maybeSingle(),
         admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active").order("updated_at", { ascending: false }).limit(250),
-        admin.from("whatsapp_templates").select("id, name, display_name, category, language, body, variables, status, external_template_id, rejection_reason").order("updated_at", { ascending: false }).limit(100),
+        admin.from("whatsapp_templates").select("id, name, display_name, category, language, body, variables, status, external_template_id, rejection_reason, created_at").order("updated_at", { ascending: false }).limit(100),
         admin.from("whatsapp_campaigns").select("id, name, status, recipient_count, sent_count, delivered_count, read_count, failed_count, created_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
         admin.from("whatsapp_messages").select("id, body, direction, status, error_message, created_at, whatsapp_contacts(full_name)").order("created_at", { ascending: false }).limit(100),
+        admin.from("audit_logs").select("entity_id, created_at").eq("action", "submit_whatsapp_template").order("created_at", { ascending: true }).limit(500),
     ])
 
-    const firstError = [connectionResult.error, contactsResult.error, templatesResult.error, campaignsResult.error, messagesResult.error].find(Boolean)
+    const firstError = [connectionResult.error, contactsResult.error, templatesResult.error, campaignsResult.error, messagesResult.error, templateAuditResult.error].find(Boolean)
     if (firstError) {
         throw new Error(firstError.message)
     }
@@ -281,6 +283,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         phone: row.phone,
         source: row.source as WhatsAppContactRecord["source"],
     }))
+    const submittedAtByTemplate = new Map((templateAuditResult.data ?? []).filter((row) => row.entity_id).map((row) => [row.entity_id as string, row.created_at]))
     const templates = (templatesResult.data ?? []).map((row) => ({
         body: row.body,
         category: row.category as WhatsAppTemplateRecord["category"],
@@ -291,6 +294,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         name: row.name,
         rejectionReason: row.rejection_reason ?? null,
         status: row.status as WhatsAppTemplateRecord["status"],
+        submittedAt: submittedAtByTemplate.get(row.id) ?? (row.external_template_id ? row.created_at : null),
         variables: toVariables(row.variables),
     }))
     const campaigns = (campaignsResult.data ?? []).map((row) => {
