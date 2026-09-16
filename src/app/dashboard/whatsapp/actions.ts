@@ -848,17 +848,26 @@ function resolveVariableValue(variable: string, contact: WhatsAppContactRecord, 
 export async function loadCsvBuilderAudience(): Promise<{ error?: string; rows?: CsvAudienceRow[] }> {
     try {
         const context = await requireCapability("campaigns")
-        const [{ data: profiles, error: profilesError }, { data: roles, error: rolesError }, { data: orders, error: ordersError }, { data: contacts, error: contactsError }] = await Promise.all([
-            context.adminSupabase.from("profiles").select("id, full_name, phone, address, state, street_address, house_number").limit(5000),
-            context.adminSupabase.from("user_roles").select("user_id, role").limit(10000),
-            context.adminSupabase.from("orders").select("id, customer_id, status, created_at").order("created_at", { ascending: false }).limit(10000),
-            context.adminSupabase.from("whatsapp_contacts").select("id, profile_id, full_name, phone, email, opted_in, is_active, source, custom_fields").limit(5000),
+        const pageSize = 500
+        async function loadEveryPage<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
+            const all: T[] = []
+            for (let from = 0; ; from += pageSize) {
+                const { data, error } = await fetchPage(from, from + pageSize - 1)
+                if (error) throw new Error(error.message)
+                const page = data ?? []
+                all.push(...page)
+                if (page.length < pageSize) return all
+            }
+        }
+        const [profiles, roles, orders, contacts] = await Promise.all([
+            loadEveryPage((from, to) => context.adminSupabase.from("profiles").select("id, full_name, phone, address, state, street_address, house_number").order("id").range(from, to)),
+            loadEveryPage((from, to) => context.adminSupabase.from("user_roles").select("user_id, role").order("user_id").range(from, to)),
+            loadEveryPage((from, to) => context.adminSupabase.from("orders").select("id, customer_id, status, created_at").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
+            loadEveryPage((from, to) => context.adminSupabase.from("whatsapp_contacts").select("id, profile_id, full_name, phone, email, opted_in, is_active, source, custom_fields").order("id").range(from, to)),
         ])
-        const firstError = profilesError ?? rolesError ?? ordersError ?? contactsError
-        if (firstError) return { error: firstError.message }
 
         const authById = new Map<string, { email: string; registrationMethod: CsvAudienceRow["registrationMethod"] }>()
-        for (let page = 1; page <= 10; page += 1) {
+        for (let page = 1; ; page += 1) {
             const { data, error } = await context.adminSupabase.auth.admin.listUsers({ page, perPage: 1000 })
             if (error) return { error: error.message }
             for (const user of data.users) {

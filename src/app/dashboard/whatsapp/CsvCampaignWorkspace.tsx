@@ -25,6 +25,18 @@ const friendly: Record<string, string> = {
     order_number: "Order number", order_status: "Order status", phone: "WhatsApp number",
     registration_method: "Registration method", roles: "Role", source: "Added from", state: "State",
 }
+const columnHelp: Record<string, string> = {
+    address: "The customer's address saved on their RSS profile or contact record. This adds a CSV column; it does not filter people.",
+    email: "The customer's saved email address, if available. Tick to include it in the CSV and template mapping.",
+    full_name: "The customer's name from their RSS profile or WhatsApp contact. Useful for a personal greeting.",
+    order_number: "The customer's most recent RSS order number, when one is available.",
+    order_status: "The status of the customer's most recent RSS order, when one is available.",
+    phone: "The WhatsApp number used to match and send to this person. Keep this selected so it appears in your CSV.",
+    registration_method: "How the RSS account was created or confirmed, such as Google, phone or email. Manual contacts may have no method.",
+    roles: "The person's RSS role or roles, such as customer, rider or merchant.",
+    source: "Whether the person registered on RSS, was added on the Add User page, or was entered in the WhatsApp Contact Book.",
+    state: "The state saved in the customer's RSS profile or contact record, if available.",
+}
 
 function label(value: string) {
     return friendly[value] ?? value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase())
@@ -111,6 +123,15 @@ function ExplainedSelect<T extends string>({ label: selectLabel, onChange, optio
     </label>
 }
 
+function ColumnChoice({ checked, column, onChange }: { checked: boolean; column: string; onChange: (checked: boolean) => void }) {
+    const description = columnHelp[column] ?? `Include the ${label(column)} column from the uploaded CSV. This does not filter people.`
+    return <label className="group/column relative flex cursor-pointer items-center gap-3 rounded-xl border p-3 focus-within:border-emerald-500 hover:border-emerald-300">
+        <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} aria-label={`Include ${label(column)}`} />
+        <span>{label(column)}</span>
+        <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-[min(22rem,calc(100vw-4rem))] rounded-xl bg-zinc-950 p-3 text-xs font-normal leading-5 text-white shadow-xl group-hover/column:block group-focus-within/column:block">{description}</span>
+    </label>
+}
+
 export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns: WhatsAppCampaignRecord[]; mode: "builder" | "campaign"; templates: WhatsAppTemplateRecord[] }) {
     const [isPending, startTransition] = useTransition()
     const [saved, setSaved] = useState<SavedAudience[]>([])
@@ -160,12 +181,15 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
         if (!query) return currentRows
         const digits = query.replace(/\D/g, "")
         return currentRows.filter((row) => {
-            const textMatch = [row.fields.full_name, row.fields.email, row.phone]
+            const searchableValues = source === "upload"
+                ? Object.entries(row.fields).filter(([column]) => /name|email|phone|whats|mobile|number/i.test(column)).map(([, value]) => value)
+                : [row.fields.full_name, row.fields.email]
+            const textMatch = [...searchableValues, row.phone]
                 .some((value) => value?.toLowerCase().includes(query))
             const phoneMatch = digits.length > 0 && row.phone.replace(/\D/g, "").includes(digits)
             return textMatch || phoneMatch
         })
-    }, [currentRows, searchQuery])
+    }, [currentRows, searchQuery, source])
     const availableColumns = source === "database" ? Object.keys(friendly).filter((key) => key !== "opted_in") : uploadColumns
     const selectedAudience = saved.find((audience) => audience.id === audienceId)
     const selectedTemplate = approved.find((template) => template.id === templateId)
@@ -256,7 +280,7 @@ export function CsvCampaignWorkspace({ campaigns, mode, templates }: { campaigns
                 </div>}
             </section>
 
-            {currentRows.length ? <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Choose information</p><h2 className="mt-2 text-2xl font-black">{searchedRows.length.toLocaleString()} people found</h2><p className="text-sm text-gray-500">Choose everything you may want to use in a template.</p></div><Badge className="bg-emerald-100 text-emerald-700">{searchedRows.filter((row) => row.consent).length.toLocaleString()} allowed to message</Badge></div><label className="mt-6 block space-y-2"><span className="text-sm font-bold">Search these people</span><Input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Type a customer name, email or phone number" /><span className="text-xs text-gray-500">The table, downloaded CSV and saved audience will use these filtered results.</span></label><div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{availableColumns.map((column) => <label key={column} className="flex items-center gap-3 rounded-xl border p-3"><input type="checkbox" checked={selectedColumns.includes(column)} onChange={(event) => setSelectedColumns((current) => event.target.checked ? [...current, column] : current.filter((item) => item !== column))} /><span>{label(column)}</span></label>)}</div><div className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><label className="space-y-2"><span className="text-sm font-bold">Audience name</span><Input value={audienceName} onChange={(event) => setAudienceName(event.target.value)} placeholder="Example: Ready orders" /></label><Button className="self-end" variant="outline" onClick={downloadAudience}><Download className="mr-2 h-4 w-4" />Download CSV</Button><Button className="self-end bg-[#128C7E]" onClick={saveAudience}>Save for campaigns</Button></div><div className="mt-6 overflow-x-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="bg-gray-50 dark:bg-zinc-800"><tr>{selectedColumns.slice(0, 5).map((column) => <th className="p-3" key={column}>{label(column)}</th>)}</tr></thead><tbody>{searchedRows.slice(0, 25).map((row, index) => <tr className="border-t" key={index}>{selectedColumns.slice(0, 5).map((column) => <td className="max-w-48 truncate p-3" key={column}>{row.fields[column] || "—"}</td>)}</tr>)}</tbody></table>{searchedRows.length === 0 ? <p className="p-8 text-center text-sm text-gray-500">No one matches that search.</p> : null}{searchedRows.length > 25 ? <p className="border-t p-3 text-center text-xs text-gray-500">Showing the first 25 of {searchedRows.length.toLocaleString()} matching people.</p> : null}</div></section> : null}
+            {currentRows.length ? <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"><div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Choose information</p><h2 className="mt-2 text-2xl font-black">{searchedRows.length.toLocaleString()} people found</h2><p className="text-sm text-gray-500">Tick the details to include in your CSV. These boxes do not change who is included.</p></div><Badge className="bg-emerald-100 text-emerald-700">{searchedRows.filter((row) => row.consent).length.toLocaleString()} allowed to message</Badge></div><label className="mt-6 block space-y-2"><span className="text-sm font-bold">Search these people</span><Input type="search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Type a customer name, email or phone number" /><span className="text-xs text-gray-500">The table, downloaded CSV and saved audience will use these filtered results.</span></label><div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{availableColumns.map((column) => <ColumnChoice key={column} column={column} checked={selectedColumns.includes(column)} onChange={(checked) => setSelectedColumns((current) => checked ? [...current, column] : current.filter((item) => item !== column))} />)}</div><div className="mt-6 grid gap-3 sm:grid-cols-[1fr_auto_auto]"><label className="space-y-2"><span className="text-sm font-bold">Audience name</span><Input value={audienceName} onChange={(event) => setAudienceName(event.target.value)} placeholder="Example: Ready orders" /></label><Button className="self-end" variant="outline" onClick={downloadAudience}><Download className="mr-2 h-4 w-4" />Download CSV</Button><Button className="self-end bg-[#128C7E]" onClick={saveAudience}>Save for campaigns</Button></div><div className="mt-6 overflow-x-auto rounded-xl border"><table className="w-full text-left text-xs"><thead className="bg-gray-50 dark:bg-zinc-800"><tr>{selectedColumns.slice(0, 5).map((column) => <th className="p-3" key={column}>{label(column)}</th>)}</tr></thead><tbody>{searchedRows.slice(0, 25).map((row, index) => <tr className="border-t" key={index}>{selectedColumns.slice(0, 5).map((column) => <td className="max-w-48 truncate p-3" key={column}>{row.fields[column] || "—"}</td>)}</tr>)}</tbody></table>{searchedRows.length === 0 ? <p className="p-8 text-center text-sm text-gray-500">No one matches that search.</p> : null}{searchedRows.length > 25 ? <p className="border-t p-3 text-center text-xs text-gray-500">Showing the first 25 of {searchedRows.length.toLocaleString()} matching people.</p> : null}</div></section> : null}
         </div>
     )
 
