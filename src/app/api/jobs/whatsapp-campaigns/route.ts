@@ -95,7 +95,7 @@ async function processCampaign(admin: ReturnType<typeof createAdminClient>, camp
 
 export async function GET(request: NextRequest) {
     const secret = process.env.CRON_SECRET
-    if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
+    if (process.env.CAMPAIGN_WORKER_ENABLED !== "true" || !secret || secret.length < 32 || request.headers.get("authorization") !== `Bearer ${secret}`) {
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
     try {

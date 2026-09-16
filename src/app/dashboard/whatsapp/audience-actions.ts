@@ -165,7 +165,9 @@ export async function queueAudienceCampaign(input: {
 }) {
     try {
         const { admin, actor } = await campaignAccess()
-        if (!process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) return { error: "The protected campaign worker is not configured." }
+        if (process.env.CAMPAIGN_WORKER_ENABLED !== "true" || !process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
+            return { error: "The protected campaign worker is not configured." }
+        }
         if (!/^[0-9a-f-]{36}$/i.test(input.requestKey)) return { error: "Start a new campaign and try again." }
         const { data: id, error } = await admin.rpc("whatsapp_prepare_campaign", {
             p_actor: actor, p_audience_id: input.audienceId, p_mapping: input.mapping,

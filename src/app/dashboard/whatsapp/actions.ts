@@ -359,7 +359,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
 
     return {
         access: context.whatsappAccess,
-        campaignWorkerConfigured: Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
+        campaignWorkerConfigured: Boolean(process.env.CAMPAIGN_WORKER_ENABLED === "true" && process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
         campaigns,
         connection: connectionRow ? {
             accountLabel: connectionRow.account_label,
