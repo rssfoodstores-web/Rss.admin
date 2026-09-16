@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
     }
     if (!contact) return NextResponse.json({ error: "Could not identify customer" }, { status: 400 })
 
+    // CSV campaign sends may precede the first Contact Book entry. Link their history now.
+    await admin.from("whatsapp_messages").update({ contact_id: contact.id })
+        .eq("direction", "outbound").is("contact_id", null).contains("metadata", { phone })
+
     const { error } = await admin.from("whatsapp_messages").upsert({
         body,
         contact_id: contact.id,

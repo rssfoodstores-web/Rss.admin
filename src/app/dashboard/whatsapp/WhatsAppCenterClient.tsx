@@ -32,7 +32,7 @@ import {
     type WhatsAppTeamRecord,
 } from "./actions"
 import { ChatWorkspace } from "./ChatWorkspace"
-import { CsvCampaignWorkspace } from "./CsvCampaignWorkspace"
+import { SecureCsvCampaignWorkspace } from "./SecureCsvCampaignWorkspace"
 import { TemplateWorkspace } from "./TemplateWorkspace"
 
 type TabKey = "builder" | "campaigns" | "contacts" | "home" | "send" | "settings" | "templates"
@@ -310,9 +310,9 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 </div>
             ) : null}
 
-            {activeTab === "builder" ? <CsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} /> : null}
+            {activeTab === "builder" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
 
-            {activeTab === "campaigns" ? <CsvCampaignWorkspace campaigns={initialData.campaigns} mode="campaign" templates={initialData.templates} /> : null}
+            {activeTab === "campaigns" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="campaign" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
 
             {activeTab === "settings" && initialData.access.canManageSettings ? (
                 <div className="space-y-6">

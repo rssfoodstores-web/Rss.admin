@@ -69,6 +69,7 @@ export interface WhatsAppCampaignRecord {
     createdAt: string
     deliveredCount: number
     failedCount: number
+    skippedCount: number
     id: string
     name: string
     readCount: number
@@ -109,6 +110,7 @@ export interface WhatsAppTeamRecord {
 
 export interface WhatsAppCenterPageData {
     access: WhatsAppAccess
+    campaignWorkerConfigured: boolean
     campaigns: WhatsAppCampaignRecord[]
     connection: WhatsAppConnectionSummary | null
     contacts: WhatsAppContactRecord[]
@@ -125,26 +127,6 @@ export interface WhatsAppCenterPageData {
     templates: WhatsAppTemplateRecord[]
 }
 
-export interface CsvAudienceRow {
-    address: string
-    email: string
-    fullName: string
-    id: string
-    optedIn: boolean
-    orderId: string
-    orderStatus: string
-    phone: string
-    registrationMethod: "admin" | "email" | "google" | "phone" | "unknown"
-    roles: string[]
-    source: "admin" | "dashboard" | "rss"
-    state: string
-}
-
-export interface CsvCampaignRow {
-    consent: boolean
-    fields: Record<string, string>
-    phone: string
-}
 
 interface GrantRow {
     access_level: "manager" | "operator"
@@ -274,7 +256,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         admin.from("whatsapp_connections").select("account_label, graph_api_version, api_token_ciphertext, meta_access_token_ciphertext, is_active, last_test_message, last_test_status, last_tested_at, phone_number_id, waba_id, webhook_secret").eq("id", "primary").maybeSingle(),
         admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active").order("updated_at", { ascending: false }).limit(250),
         admin.from("whatsapp_templates").select("id, name, display_name, category, language, body, variables, status, external_template_id, rejection_reason, created_at").order("updated_at", { ascending: false }).limit(100),
-        admin.from("whatsapp_campaigns").select("id, name, status, recipient_count, sent_count, delivered_count, read_count, failed_count, created_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
+        admin.from("whatsapp_campaigns").select("id, name, status, recipient_count, sent_count, delivered_count, read_count, failed_count, skipped_count, created_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
         admin.from("whatsapp_messages").select("id, contact_id, body, direction, status, error_message, sent_by, created_at, whatsapp_contacts(full_name)").order("created_at", { ascending: false }).limit(1000),
         admin.from("audit_logs").select("entity_id, created_at").eq("action", "submit_whatsapp_template").order("created_at", { ascending: true }).limit(500),
         admin.from("whatsapp_conversation_assignments").select("contact_id, assigned_to, status"),
@@ -317,6 +299,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
             createdAt: row.created_at,
             deliveredCount: row.delivered_count,
             failedCount: row.failed_count,
+            skippedCount: row.skipped_count,
             id: row.id,
             name: row.name,
             readCount: row.read_count,
@@ -376,6 +359,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
 
     return {
         access: context.whatsappAccess,
+        campaignWorkerConfigured: Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
         campaigns,
         connection: connectionRow ? {
             accountLabel: connectionRow.account_label,
@@ -845,156 +829,6 @@ function resolveVariableValue(variable: string, contact: WhatsAppContactRecord, 
     return defaults[variable] ?? standardValues[variable] ?? contact.customFields[variable] ?? "-"
 }
 
-export async function loadCsvBuilderAudience(): Promise<{ error?: string; rows?: CsvAudienceRow[] }> {
-    try {
-        const context = await requireCapability("campaigns")
-        const pageSize = 500
-        async function loadEveryPage<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
-            const all: T[] = []
-            for (let from = 0; ; from += pageSize) {
-                const { data, error } = await fetchPage(from, from + pageSize - 1)
-                if (error) throw new Error(error.message)
-                const page = data ?? []
-                all.push(...page)
-                if (page.length < pageSize) return all
-            }
-        }
-        const [profiles, roles, orders, contacts] = await Promise.all([
-            loadEveryPage((from, to) => context.adminSupabase.from("profiles").select("id, full_name, phone, address, state, street_address, house_number").order("id").range(from, to)),
-            loadEveryPage((from, to) => context.adminSupabase.from("user_roles").select("user_id, role").order("user_id").range(from, to)),
-            loadEveryPage((from, to) => context.adminSupabase.from("orders").select("id, customer_id, status, created_at").order("created_at", { ascending: false }).order("id", { ascending: false }).range(from, to)),
-            loadEveryPage((from, to) => context.adminSupabase.from("whatsapp_contacts").select("id, profile_id, full_name, phone, email, opted_in, is_active, source, custom_fields").order("id").range(from, to)),
-        ])
-
-        const authById = new Map<string, { email: string; registrationMethod: CsvAudienceRow["registrationMethod"] }>()
-        for (let page = 1; ; page += 1) {
-            const { data, error } = await context.adminSupabase.auth.admin.listUsers({ page, perPage: 1000 })
-            if (error) return { error: error.message }
-            for (const user of data.users) {
-                const provider = typeof user.app_metadata?.provider === "string" ? user.app_metadata.provider : ""
-                const providers = Array.isArray(user.app_metadata?.providers) ? user.app_metadata.providers : []
-                const creationMethod = typeof user.app_metadata?.creation_method === "string" ? user.app_metadata.creation_method : ""
-                authById.set(user.id, {
-                    email: user.email ?? "",
-                    registrationMethod: creationMethod === "admin_password_account"
-                        ? "admin"
-                        : provider === "google" || providers.includes("google") || user.identities?.some((identity) => identity.provider === "google")
-                            ? "google"
-                            : user.phone_confirmed_at
-                                ? "phone"
-                                : user.email_confirmed_at
-                                    ? "email"
-                                    : "unknown",
-                })
-            }
-            if (data.users.length < 1000) break
-        }
-
-        const rolesByUser = new Map<string, string[]>()
-        for (const row of roles ?? []) rolesByUser.set(row.user_id, [...(rolesByUser.get(row.user_id) ?? []), String(row.role)])
-        const latestOrderByUser = new Map<string, { id: string; status: string }>()
-        for (const order of orders ?? []) if (!latestOrderByUser.has(order.customer_id)) latestOrderByUser.set(order.customer_id, { id: order.id, status: String(order.status ?? "") })
-        const contactByProfile = new Map((contacts ?? []).filter((row) => row.profile_id).map((row) => [row.profile_id as string, row]))
-
-        const rssRows: CsvAudienceRow[] = (profiles ?? []).map((profile) => {
-            const contact = contactByProfile.get(profile.id)
-            const auth = authById.get(profile.id)
-            const order = latestOrderByUser.get(profile.id)
-            return {
-                address: [profile.house_number, profile.street_address, profile.address].filter(Boolean).join(" "),
-                email: contact?.email ?? auth?.email ?? "",
-                fullName: profile.full_name,
-                id: `rss:${profile.id}`,
-                optedIn: Boolean(contact?.opted_in && contact?.is_active),
-                orderId: order?.id ?? "",
-                orderStatus: order?.status ?? "",
-                phone: normalizeWhatsAppPhone(contact?.phone ?? profile.phone ?? "") ?? "",
-                registrationMethod: auth?.registrationMethod ?? "unknown",
-                roles: rolesByUser.get(profile.id) ?? [],
-                source: auth?.registrationMethod === "admin" ? "admin" : "rss",
-                state: profile.state ?? "",
-            }
-        })
-        const manualRows: CsvAudienceRow[] = (contacts ?? []).filter((contact) => !contact.profile_id).map((contact) => ({
-            address: toStringRecord(contact.custom_fields).address ?? "",
-            email: contact.email ?? "",
-            fullName: contact.full_name,
-            id: `dashboard:${contact.id}`,
-            optedIn: Boolean(contact.opted_in && contact.is_active),
-            orderId: toStringRecord(contact.custom_fields).order_number ?? "",
-            orderStatus: toStringRecord(contact.custom_fields).order_status ?? "",
-            phone: normalizeWhatsAppPhone(contact.phone) ?? "",
-            registrationMethod: "unknown",
-            roles: ["customer"],
-            source: "dashboard",
-            state: toStringRecord(contact.custom_fields).state ?? "",
-        }))
-        return { rows: [...rssRows, ...manualRows] }
-    } catch (error) {
-        return { error: error instanceof Error ? error.message : "Unable to load audience data." }
-    }
-}
-
-export async function sendCsvCampaign(input: {
-    name: string
-    rows: CsvCampaignRow[]
-    templateId: string
-    variableColumns: Record<string, string>
-}): Promise<ActionResult & { failed?: number; sent?: number }> {
-    try {
-        const context = await requireCapability("campaigns")
-        const rows = input.rows.slice(0, 5000)
-        if (!input.name.trim()) return { error: "Name this campaign." }
-        if (rows.length === 0) return { error: "Choose a CSV with at least one recipient." }
-        const { data: template, error: templateError } = await context.adminSupabase.from("whatsapp_templates").select("id, name, language, body, variables, status").eq("id", input.templateId).single()
-        if (templateError || !template) return { error: templateError?.message ?? "Template not found." }
-        if (template.status !== "approved") return { error: "Only an approved template can be sent." }
-        const variables = toVariables(template.variables)
-        for (const variable of variables) if (!input.variableColumns[variable.name]) return { error: `Choose a column for ${variable.name.replace(/_/g, " ")}.` }
-
-        const prepared = rows.flatMap((row) => {
-            const phone = normalizeWhatsAppPhone(row.phone)
-            if (!phone || !row.consent) return []
-            const values = variables.map((variable) => row.fields[input.variableColumns[variable.name]]?.trim() ?? "")
-            return values.some((value) => !value) ? [] : [{ phone, values, fields: row.fields }]
-        })
-        if (prepared.length === 0) return { error: "No rows are ready. Check phone numbers, consent and required values." }
-
-        const { data: campaign, error: campaignError } = await context.adminSupabase.from("whatsapp_campaigns").insert({
-            approved_by: context.access.user.id,
-            created_by: context.access.user.id,
-            name: input.name.trim(),
-            recipient_count: prepared.length,
-            status: "sending",
-            template_id: template.id,
-            variable_defaults: input.variableColumns,
-        }).select("id").single()
-        if (campaignError || !campaign) return { error: campaignError?.message ?? "Unable to create the campaign." }
-
-        let sent = 0
-        let failed = 0
-        for (let index = 0; index < prepared.length; index += 5) {
-            const outcomes = await Promise.all(prepared.slice(index, index + 5).map(async (row) => {
-                const body = renderTemplate(template.body, Object.fromEntries(variables.map((variable, i) => [variable.name, row.values[i]])))
-                try {
-                    const externalMessageId = await sendMetaTemplateMessage({ language: template.language, name: template.name, phone: row.phone, values: row.values })
-                    sent += 1
-                    return { body, campaign_id: campaign.id, contact_id: null, direction: "outbound", external_message_id: externalMessageId, message_type: "template", metadata: { phone: row.phone }, sent_by: context.access.user.id, status: "sent" }
-                } catch (error) {
-                    failed += 1
-                    return { body, campaign_id: campaign.id, contact_id: null, direction: "outbound", error_message: error instanceof Error ? error.message : "Send failed", message_type: "template", metadata: { phone: row.phone }, sent_by: context.access.user.id, status: "failed" }
-                }
-            }))
-            await context.adminSupabase.from("whatsapp_messages").insert(outcomes)
-        }
-        await context.adminSupabase.from("whatsapp_campaigns").update({ failed_count: failed, sent_count: sent, status: failed === prepared.length ? "failed" : "completed", updated_at: new Date().toISOString() }).eq("id", campaign.id)
-        await writeAudit(context, "send_csv_whatsapp_campaign", "whatsapp_campaign", campaign.id, { failed, recipients: prepared.length, sent })
-        refreshWhatsAppCenter()
-        return { failed, sent, success: true }
-    } catch (error) {
-        return { error: error instanceof Error ? error.message : "Unable to send the CSV campaign." }
-    }
-}
 
 export async function sendWhatsAppCampaign(input: {
     contactIds: string[]
