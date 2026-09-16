@@ -183,6 +183,9 @@ export async function queueAudienceCampaign(input: {
 
 export async function resumeAudienceCampaign(campaignId: string) {
     try {
+        if (process.env.CAMPAIGN_WORKER_ENABLED !== "true" || !process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
+            return { error: "The protected campaign worker is not configured." }
+        }
         const { admin } = await campaignAccess()
         const [campaign, remaining] = await Promise.all([
             admin.from("whatsapp_campaigns").select("id,status,audience_id").eq("id", campaignId).single(),
