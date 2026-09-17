@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { saveWhatsAppTemplate, submitWhatsAppTemplate, syncWhatsAppTemplateStatuses, type WhatsAppTemplateRecord } from "./actions"
+import { getWhatsAppHealth, saveWhatsAppTemplate, submitWhatsAppTemplate, syncWhatsAppTemplateStatuses, type WhatsAppTemplateRecord } from "./actions"
+import type { WhatsAppHealthSnapshot } from "@/lib/whatsapp-health"
 
 type Category = "authentication" | "marketing" | "utility"
 
@@ -49,7 +50,7 @@ function formatElapsed(value: string | null, now: number) {
 }
 
 function statusCopy(status: WhatsAppTemplateRecord["status"]) {
-    if (status === "approved") return "Approved by Meta and ready for campaigns."
+    if (status === "approved") return "RSS last saved this as approved. Check Meta health for the current status before sending."
     if (status === "rejected") return "Meta found a problem. Read the reason below before creating a corrected template."
     if (status === "paused") return "Meta paused this template. Do not use it until its status changes."
     if (status === "pending") return "Meta is reviewing the wording and selected purpose. You cannot send it yet."
@@ -60,6 +61,10 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [isSyncing, setIsSyncing] = useState(false)
+    const [health, setHealth] = useState<WhatsAppHealthSnapshot["templates"] | null>(null)
+    const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null)
+    const [healthLoading, setHealthLoading] = useState(false)
+    const [healthError, setHealthError] = useState<string | null>(null)
     const [now, setNow] = useState(() => Date.now())
     const [form, setForm] = useState({ body: "", category: "utility" as Category, displayName: "", language: "en_US", name: "" })
     const [customVariable, setCustomVariable] = useState("")
@@ -72,6 +77,22 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
         const timer = window.setInterval(() => setNow(Date.now()), 1000)
         return () => window.clearInterval(timer)
     }, [])
+
+    async function checkTemplateHealth() {
+        setHealthLoading(true)
+        setHealthError(null)
+        try {
+            const snapshot = await getWhatsAppHealth()
+            setHealth(snapshot.templates)
+            setHealthCheckedAt(snapshot.checkedAt)
+        } catch {
+            setHealthError("Could not check template health with Meta. Try again.")
+        } finally {
+            setHealthLoading(false)
+        }
+    }
+
+    useEffect(() => { void checkTemplateHealth() }, [])
 
     function act(action: () => Promise<{ error?: string; success?: true }>, success: string) {
         startTransition(() => void action().then((result) => {
@@ -99,6 +120,7 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
             const result = await syncWhatsAppTemplateStatuses()
             if (result.error) return toast.error(result.error)
             toast.success("Latest statuses received from Meta.")
+            await checkTemplateHealth()
             router.refresh()
         } catch {
             toast.error("Could not check Meta right now.")
@@ -126,14 +148,25 @@ export function TemplateWorkspace({ canSync, templates }: { canSync: boolean; te
         </section>
 
         <section className="rounded-[2rem] border border-gray-100 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Your templates</h2><p className="text-sm text-gray-500">Every status explains what it means and what to do next.</p></div><Button variant="outline" aria-busy={isSyncing} disabled={isSyncing || isPending || !canSync} onClick={() => void checkWithMeta()}>{isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}<span aria-live="polite">{isSyncing ? "Checking Meta…" : "Check with Meta"}</span></Button></div>
+            <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-2xl font-black">Your templates</h2><p className="text-sm text-gray-500">The saved RSS status is shown alongside a live Meta health check.</p></div><Button variant="outline" aria-busy={isSyncing} disabled={isSyncing || isPending || !canSync} onClick={() => void checkWithMeta()}>{isSyncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}<span aria-live="polite">{isSyncing ? "Updating from Meta…" : "Update RSS from Meta"}</span></Button></div>
+            <div className="mt-5 rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 text-sm dark:border-emerald-900 dark:bg-emerald-950/20">
+                <div className="flex flex-wrap items-center justify-between gap-2"><div><strong>Template health from Meta</strong><p className="mt-1 text-xs text-gray-600 dark:text-zinc-300">A live check shows approval, quality and problems. It does not send a message or change RSS records.</p></div><Button size="sm" variant="outline" disabled={healthLoading || !canSync} onClick={() => void checkTemplateHealth()}>{healthLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}{healthLoading ? "Checking…" : "Check health"}</Button></div>
+                <p className="mt-2 text-xs text-gray-500" aria-live="polite">{healthCheckedAt ? `Last checked ${new Date(healthCheckedAt).toLocaleString()}` : healthLoading ? "Checking Meta now…" : "Not checked yet"}</p>
+                {healthError || health?.error ? <p role="alert" className="mt-2 text-sm text-amber-800">{healthError || health?.error} This is not a healthy result; the saved RSS statuses may be out of date.</p> : null}
+                {health && !health.error ? <><div className="mt-3 flex flex-wrap gap-2 text-xs font-bold"><span className="rounded-full bg-white px-3 py-1 text-emerald-800">{health.items.filter((item) => item.status.toUpperCase() === "APPROVED").length} approved</span><span className="rounded-full bg-white px-3 py-1 text-amber-800">{health.items.filter((item) => item.status.toUpperCase() === "PENDING").length} pending</span><span className="rounded-full bg-white px-3 py-1 text-red-800">{health.items.filter((item) => !["APPROVED", "PENDING"].includes(item.status.toUpperCase())).length} need attention</span></div>{health.truncated ? <p className="mt-2 text-xs text-amber-800">Meta returned only the first 1,000 templates. This health check is incomplete.</p> : null}{health.localOnly.length ? <p className="mt-2 text-xs text-amber-800">{health.localOnly.length} submitted RSS template(s) were not found in this Meta check. Check the connected business account and language.</p> : null}{health.items.filter((item) => !templates.some((local) => local.name === item.name && local.language.toLowerCase() === item.language.toLowerCase())).length ? <div className="mt-3 border-t border-emerald-100 pt-3"><p className="font-bold">On Meta, but not saved in RSS</p>{health.items.filter((item) => !templates.some((local) => local.name === item.name && local.language.toLowerCase() === item.language.toLowerCase())).map((item) => <p key={`${item.name}:${item.language}`} className="mt-1 text-xs">{item.name} ({item.language}) · {item.status} · Quality: {item.quality ?? "Not available"}</p>)}</div> : null}</> : null}
+            </div>
             <div className="mt-5 space-y-4">{templates.length ? templates.map((template) => {
                 const elapsed = formatElapsed(template.submittedAt, now)
                 const noProblem = !template.rejectionReason || template.rejectionReason.toUpperCase() === "NONE"
                 const progress = template.status === "pending" ? Math.min(95, Math.max(4, (elapsed.hours / 24) * 100)) : template.status === "approved" ? 100 : 0
                 const isDraft = template.status === "draft"
                 const expanded = expandedTemplateIds.includes(template.id)
-                return <article key={template.id} className="group/template rounded-2xl border border-gray-100 p-5 transition hover:border-emerald-200 hover:shadow-sm dark:border-zinc-800"><button type="button" aria-expanded={expanded} onClick={() => setExpandedTemplateIds((current) => current.includes(template.id) ? current.filter((id) => id !== template.id) : [...current, template.id])} className="flex w-full items-start justify-between gap-4 text-left"><div><p className="text-lg font-black">{template.displayName}</p><p className="mt-1 font-mono text-xs text-gray-400">{template.name}</p><p className="mt-2 text-xs font-semibold text-[#128C7E]">{expanded ? "Click to hide details" : "Hover or click to see details"}</p></div><Badge className={cn("capitalize", template.status === "approved" && "bg-emerald-100 text-emerald-700", template.status === "pending" && "bg-amber-100 text-amber-700", template.status === "rejected" && "bg-red-100 text-red-700")}>{template.status}</Badge></button>{template.status === "pending" ? <div className="mt-4"><div className="flex items-center justify-between text-xs"><span className="flex items-center gap-1 font-bold text-amber-700"><Clock3 className="h-4 w-4" />Under Meta review</span><span>{elapsed.label} pending</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-100"><div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-xs text-gray-500">The bar compares the wait with Meta’s usual 24-hour review window. It is an estimate, not a deadline.{elapsed.hours >= 24 ? " This is taking longer than usual—check with Meta again and then inspect WhatsApp Manager." : ""}</p></div> : null}<div className={cn("mt-3", !expanded && "hidden group-hover/template:block group-focus-within/template:block")}><div className="rounded-xl bg-gray-50 p-3 text-sm dark:bg-zinc-800"><strong className="capitalize">{purposes.find((purpose) => purpose.value === template.category)?.label ?? template.category}</strong><p className="mt-1 text-xs text-gray-500">{statusCopy(template.status)}</p></div><p className="mt-3 text-sm text-gray-700 dark:text-zinc-200">{template.body}</p><div className="mt-3 flex flex-wrap gap-2">{template.variables.map((variable) => <Badge variant="outline" key={variable.name}>{variable.name.replace(/_/g, " ")}</Badge>)}{!template.variables.length ? <span className="text-xs text-gray-400">No personal information</span> : null}</div><div className={cn("mt-4 flex gap-2 rounded-xl p-3 text-xs", isDraft ? "bg-blue-50 text-blue-800" : noProblem ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800")}>{isDraft ? <Sparkles className="h-4 w-4 shrink-0" /> : noProblem ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}<span><strong>{isDraft ? "Not submitted to Meta yet" : noProblem ? "No problem reported by Meta" : "Meta reported a problem"}</strong><br />{isDraft ? "This is still an RSS draft. Check its purpose and preview before submitting." : noProblem ? template.status === "approved" ? "Meta approved this template and reported no problem." : "Meta returned no rejection reason. Pending only means the review is not finished." : template.rejectionReason}</span></div>{template.status === "draft" ? <Button size="sm" className="mt-4" disabled={isPending || !canSync} onClick={() => act(() => submitWhatsAppTemplate(template.id), "Template submitted to Meta for review.")}>Submit to Meta</Button> : null}</div></article>
+                const live = health?.error ? undefined : health?.items.find((item) => item.name === template.name && item.language.toLowerCase() === template.language.toLowerCase())
+                const statusChanged = live && live.status.toLowerCase() !== template.status
+                const categoryChanged = live && live.category.toLowerCase() !== template.category
+                return <article key={template.id} className="group/template rounded-2xl border border-gray-100 p-5 transition hover:border-emerald-200 hover:shadow-sm dark:border-zinc-800"><button type="button" aria-expanded={expanded} onClick={() => setExpandedTemplateIds((current) => current.includes(template.id) ? current.filter((id) => id !== template.id) : [...current, template.id])} className="flex w-full items-start justify-between gap-4 text-left"><div><p className="text-lg font-black">{template.displayName}</p><p className="mt-1 font-mono text-xs text-gray-400">{template.name}</p><p className="mt-2 text-xs font-semibold text-[#128C7E]">{expanded ? "Click to hide details" : "Hover or click to see details"}</p></div><Badge className={cn("capitalize", template.status === "approved" && "bg-emerald-100 text-emerald-700", template.status === "pending" && "bg-amber-100 text-amber-700", template.status === "rejected" && "bg-red-100 text-red-700")}>RSS: {template.status}</Badge></button>
+                    <div className={cn("mt-3 rounded-xl border px-3 py-2 text-xs", statusChanged || categoryChanged || (health && !health.error && !live && !isDraft) ? "border-amber-200 bg-amber-50 text-amber-900" : "border-gray-100 bg-gray-50 text-gray-700 dark:border-zinc-800 dark:bg-zinc-800 dark:text-zinc-200")}><strong>Meta health: </strong>{isDraft ? "RSS draft — not sent to Meta" : healthLoading && !health ? "Checking…" : !health || health.error ? "Not verified right now" : live ? <>{live.status} · Quality: {live.quality ?? "Not available"} · Purpose: {live.category}{live.rejectionReason ? ` · Reason: ${live.rejectionReason}` : ""}</> : "Not found in this Meta check"}{statusChanged || categoryChanged ? <p className="mt-1 font-bold">Meta changed this template. Update RSS from Meta before using it.</p> : null}</div>
+                    {template.status === "pending" ? <div className="mt-4"><div className="flex items-center justify-between text-xs"><span className="flex items-center gap-1 font-bold text-amber-700"><Clock3 className="h-4 w-4" />Under Meta review</span><span>{elapsed.label} pending</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-amber-100"><div className="h-full rounded-full bg-amber-500 transition-all" style={{ width: `${progress}%` }} /></div><p className="mt-2 text-xs text-gray-500">The bar compares the wait with Meta’s usual 24-hour review window. It is an estimate, not a deadline.{elapsed.hours >= 24 ? " This is taking longer than usual—check with Meta again and then inspect WhatsApp Manager." : ""}</p></div> : null}<div className={cn("mt-3", !expanded && "hidden group-hover/template:block group-focus-within/template:block")}><div className="rounded-xl bg-gray-50 p-3 text-sm dark:bg-zinc-800"><strong className="capitalize">{purposes.find((purpose) => purpose.value === template.category)?.label ?? template.category}</strong><p className="mt-1 text-xs text-gray-500">{statusCopy(template.status)}</p></div><p className="mt-3 text-sm text-gray-700 dark:text-zinc-200">{template.body}</p><div className="mt-3 flex flex-wrap gap-2">{template.variables.map((variable) => <Badge variant="outline" key={variable.name}>{variable.name.replace(/_/g, " ")}</Badge>)}{!template.variables.length ? <span className="text-xs text-gray-400">No personal information</span> : null}</div><div className={cn("mt-4 flex gap-2 rounded-xl p-3 text-xs", isDraft ? "bg-blue-50 text-blue-800" : noProblem ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800")}>{isDraft ? <Sparkles className="h-4 w-4 shrink-0" /> : noProblem ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertTriangle className="h-4 w-4 shrink-0" />}<span><strong>{isDraft ? "Not submitted to Meta yet" : noProblem ? "No problem reported by Meta" : "Meta reported a problem"}</strong><br />{isDraft ? "This is still an RSS draft. Check its purpose and preview before submitting." : noProblem ? template.status === "approved" ? "Meta approved this template and reported no problem." : "Meta returned no rejection reason. Pending only means the review is not finished." : template.rejectionReason}</span></div>{template.status === "draft" ? <Button size="sm" className="mt-4" disabled={isPending || !canSync} onClick={() => act(() => submitWhatsAppTemplate(template.id), "Template submitted to Meta for review.")}>Submit to Meta</Button> : null}</div></article>
             }) : <p className="py-10 text-center text-sm text-gray-500">No templates yet.</p>}</div>
         </section>
     </div>

@@ -373,40 +373,41 @@ export async function submitMetaTemplate(input: {
 export async function listMetaTemplates() {
     const connection = await loadWhatsAppConnection()
     const meta = requireMetaConnection(connection)
-    const response = await fetch(
-        `https://graph.facebook.com/${meta.graphApiVersion}/${encodeURIComponent(meta.wabaId)}/message_templates?fields=id,name,status,rejected_reason&limit=250`,
-        {
+    const templates: Array<{ id: string | null; name: string; language: string; category: string | null; rejectionReason: string | null; status: string }> = []
+    let after: string | null = null
+    for (let page = 0; page < 4; page++) {
+        const url = new URL(`https://graph.facebook.com/${meta.graphApiVersion}/${encodeURIComponent(meta.wabaId)}/message_templates`)
+        url.searchParams.set("fields", "id,name,language,category,status,rejected_reason")
+        url.searchParams.set("limit", "250")
+        if (after) url.searchParams.set("after", after)
+        const response = await fetch(url, {
             headers: { Authorization: `Bearer ${meta.accessToken}` },
             cache: "no-store",
             signal: AbortSignal.timeout(20_000),
+        })
+        const payload = await parseProviderResponse(response)
+
+        if (!response.ok) throw new Error("Unable to sync template status from Meta. Check the Meta token and business account.")
+        if (!Array.isArray(payload.data)) throw new Error("Meta returned an unexpected template list.")
+
+        for (const item of payload.data) {
+            if (typeof item !== "object" || item === null) continue
+            const row = item as { id?: unknown; name?: unknown; language?: unknown; category?: unknown; rejected_reason?: unknown; status?: unknown }
+            if (typeof row.name !== "string" || typeof row.language !== "string" || typeof row.status !== "string") continue
+            templates.push({
+                id: typeof row.id === "string" ? row.id : null,
+                name: row.name,
+                language: row.language,
+                category: typeof row.category === "string" ? row.category.toLowerCase() : null,
+                rejectionReason: typeof row.rejected_reason === "string" ? row.rejected_reason : null,
+                status: row.status.toLowerCase(),
+            })
         }
-    )
-    const payload = await parseProviderResponse(response)
-
-    if (!response.ok) {
-        const nestedError = typeof payload.error === "object" && payload.error !== null
-            ? payload.error as { message?: unknown }
-            : null
-        throw new Error(
-            typeof nestedError?.message === "string"
-                ? nestedError.message
-                : "Unable to sync template status from Meta."
-        )
+        const paging = payload.paging as { cursors?: { after?: unknown }; next?: unknown } | undefined
+        if (typeof paging?.next !== "string" || typeof paging.cursors?.after !== "string") return templates
+        if (page === 3) throw new Error("Meta has more than 1,000 templates. Sync stopped to avoid an incomplete update.")
+        after = paging.cursors.after
     }
 
-    if (!Array.isArray(payload.data)) {
-        return []
-    }
-
-    return payload.data.flatMap((item) => {
-        if (typeof item !== "object" || item === null) return []
-        const row = item as { id?: unknown; name?: unknown; rejected_reason?: unknown; status?: unknown }
-        if (typeof row.name !== "string" || typeof row.status !== "string") return []
-        return [{
-            id: typeof row.id === "string" ? row.id : null,
-            name: row.name,
-            rejectionReason: typeof row.rejected_reason === "string" ? row.rejected_reason : null,
-            status: row.status.toLowerCase(),
-        }]
-    })
+    return templates
 }

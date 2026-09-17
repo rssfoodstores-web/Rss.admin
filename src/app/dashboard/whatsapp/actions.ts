@@ -749,14 +749,16 @@ export async function syncWhatsAppTemplateStatuses(): Promise<ActionResult> {
         for (const template of remoteTemplates) {
             const supportedStatus = ["approved", "pending", "rejected", "paused"].includes(template.status)
                 ? template.status
-                : "pending"
-            await context.adminSupabase.from("whatsapp_templates").update({
+                : "paused"
+            const { error } = await context.adminSupabase.from("whatsapp_templates").update({
                 external_template_id: template.id,
                 rejection_reason: template.rejectionReason,
                 status: supportedStatus,
+                ...(template.category && ["authentication", "marketing", "utility"].includes(template.category) ? { category: template.category } : {}),
                 updated_at: new Date().toISOString(),
                 updated_by: context.access.user.id,
-            }).eq("name", template.name)
+            }).eq("name", template.name).eq("language", template.language)
+            if (error) throw new Error("Could not save a Meta template status in RSS. No success was reported.")
         }
         await writeAudit(context, "sync_whatsapp_templates", "whatsapp_template", null, {
             remote_count: remoteTemplates.length,
