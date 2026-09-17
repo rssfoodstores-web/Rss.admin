@@ -33,6 +33,7 @@ import {
 } from "./actions"
 import { ChatWorkspace } from "./ChatWorkspace"
 import { AccountHealthWorkspace } from "./AccountHealthWorkspace"
+import { WhatsAppQuotaBanner } from "./WhatsAppQuotaBanner"
 import { SecureCsvCampaignWorkspace } from "./SecureCsvCampaignWorkspace"
 import { TemplateWorkspace } from "./TemplateWorkspace"
 
@@ -223,12 +224,15 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                             Customers, templates, messages and campaigns in one simple workspace. Follow the numbered steps and RSS is ready to send.
                         </p>
                     </div>
+                    <div className="flex flex-wrap items-start gap-3">
+                    <WhatsAppQuotaBanner />
                     <div className="flex items-center gap-3 rounded-2xl bg-black/15 px-4 py-3 backdrop-blur">
                         <span className={cn("h-3 w-3 rounded-full", initialData.connection?.isActive ? "bg-lime-300" : "bg-amber-300")} />
                         <div>
                             <p className="text-xs text-white/70">Connection</p>
                             <p className="font-bold">{initialData.connection?.isActive ? "Ready" : "Setup needed"}</p>
                         </div>
+                    </div>
                     </div>
                 </div>
             </div>

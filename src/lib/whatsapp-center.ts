@@ -3,6 +3,7 @@ import "server-only"
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { isValidE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone"
+import { reserveWhatsAppRecipient } from "@/lib/whatsapp-quota"
 
 export type WhatsAppAccessLevel = "manager" | "operator"
 export type WhatsAppCapability = "contacts" | "settings" | "templates" | "campaigns" | "messages"
@@ -214,6 +215,9 @@ export async function sendWhatChimpSessionMessage(
         throw new Error("The customer phone number is invalid.")
     }
 
+    if (!connection.isActive) throw new Error("The WhatsApp connection is paused.")
+    await reserveWhatsAppRecipient(normalizedPhone)
+
     const payload = await postWhatChimp(connection, "/whatsapp/send", {
         message,
         phone_number: normalizedPhone.replace(/^\+/, ""),
@@ -254,6 +258,9 @@ export async function sendMetaTemplateMessage(input: {
     if (!connection.metaAccessToken) {
         throw new Error("Add the Meta access token in Connection Settings to send template messages.")
     }
+
+    if (!connection.isActive) throw new Error("The WhatsApp connection is paused.")
+    await reserveWhatsAppRecipient(normalizedPhone)
 
     const response = await fetch(
         `https://graph.facebook.com/${connection.graphApiVersion}/${encodeURIComponent(connection.phoneNumberId)}/messages`,

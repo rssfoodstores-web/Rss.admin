@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { revalidatePath } from "next/cache"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { normalizeWhatsAppPhone, renderTemplate, sendMetaTemplateMessage, type WhatsAppTemplateVariable } from "@/lib/whatsapp-center"
+import { WhatsAppQuotaExceededError } from "@/lib/whatsapp-quota"
 
 export const maxDuration = 300
 export const dynamic = "force-dynamic"
@@ -34,7 +35,8 @@ async function processCampaign(admin: ReturnType<typeof createAdminClient>, camp
     let processed = 0
     const started = Date.now()
     let rateLimited = false
-    while (processed < 100 && Date.now() - started < 170_000 && !rateLimited) {
+    let quotaFull = false
+    while (processed < 100 && Date.now() - started < 170_000 && !rateLimited && !quotaFull) {
         const { data, error } = await admin.rpc("whatsapp_claim_campaign_recipients", { p_campaign_id: campaignId, p_limit: 20 })
         if (error) throw new Error(error.message)
         const batch = (data ?? []) as Recipient[]
@@ -51,7 +53,7 @@ async function processCampaign(admin: ReturnType<typeof createAdminClient>, camp
                 const contact = contactByPhone.get(row.phone)
                 const values = variables.map((variable) => row.fields[mapping[variable.name]]?.trim() ?? "")
                 const phone = normalizeWhatsAppPhone(row.phone)
-                let result: "sent" | "failed" | "skipped" = "sent"
+                let result: "sent" | "failed" | "skipped" | "queued" = "sent"
                 let errorMessage: string | null = null
                 let externalId: string | null = null
                 if (contact && (!contact.opted_in || !contact.is_active)) {
@@ -64,9 +66,15 @@ async function processCampaign(admin: ReturnType<typeof createAdminClient>, camp
                             language: template.language, name: template.name, phone, values,
                         })
                     } catch (sendError) {
-                        result = "failed"
-                        errorMessage = sendError instanceof Error ? sendError.message : "Meta could not send the message."
-                        if (/rate.limit|throttl|too many|capacity|quota/i.test(errorMessage)) rateLimited = true
+                        if (sendError instanceof WhatsAppQuotaExceededError) {
+                            result = "queued"
+                            errorMessage = "Waiting for the next RSS send slot."
+                            quotaFull = true
+                        } else {
+                            result = "failed"
+                            errorMessage = sendError instanceof Error ? sendError.message : "Meta could not send the message."
+                            if (/rate.limit|throttl|too many|capacity|quota/i.test(errorMessage)) rateLimited = true
+                        }
                     }
                 }
                 const rendered = renderTemplate(template.body, Object.fromEntries(variables.map((variable, i) => [variable.name, values[i]])))

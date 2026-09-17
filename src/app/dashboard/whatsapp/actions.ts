@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { readWhatsAppHealth, type WhatsAppHealthSnapshot } from "@/lib/whatsapp-health"
+import { getWhatsAppQuotaStatus, type WhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
 import {
     encryptCredential,
     extractTemplateVariables,
@@ -126,6 +127,11 @@ export interface WhatsAppCenterPageData {
     }
     team: WhatsAppTeamRecord[]
     templates: WhatsAppTemplateRecord[]
+}
+
+export async function getWhatsAppSendAllowance(): Promise<WhatsAppQuotaStatus> {
+    await getWhatsAppContext()
+    return getWhatsAppQuotaStatus()
 }
 
 export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
