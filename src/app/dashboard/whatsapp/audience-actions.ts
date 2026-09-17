@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { isCampaignSchedulerReady, recordCampaignWorkerFailure, runWhatsAppCampaignBatch } from "@/lib/whatsapp-campaign-worker"
 
 export type AudienceFilters = {
     origin: "all" | "rss" | "admin" | "dashboard"
@@ -165,9 +166,6 @@ export async function queueAudienceCampaign(input: {
 }) {
     try {
         const { admin, actor } = await campaignAccess()
-        if (process.env.CAMPAIGN_WORKER_ENABLED !== "true" || !process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
-            return { error: "The protected campaign worker is not configured." }
-        }
         if (!/^[0-9a-f-]{36}$/i.test(input.requestKey)) return { error: "Start a new campaign and try again." }
         const { data: id, error } = await admin.rpc("whatsapp_prepare_campaign", {
             p_actor: actor, p_audience_id: input.audienceId, p_mapping: input.mapping,
@@ -181,11 +179,65 @@ export async function queueAudienceCampaign(input: {
     }
 }
 
+export async function runTestCampaignBatch(campaignId: string) {
+    const { admin } = await campaignAccess()
+    const { data: campaign, error } = await admin.from("whatsapp_campaigns")
+        .select("id,status,audience_id,auto_send").eq("id", campaignId).single()
+    if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send) return { error: "Pause automatic sending before running a manual test batch." }
+    try {
+        const result = await runWhatsAppCampaignBatch(admin, campaignId, 5)
+        revalidatePath("/dashboard/whatsapp")
+        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota }
+    } catch (runError) {
+        await recordCampaignWorkerFailure(admin, campaignId, runError)
+        revalidatePath("/dashboard/whatsapp")
+        return { error: "The batch stopped. Open campaign problems to see why; no automatic retry was started." }
+    }
+}
+
+export async function setCampaignAutoSend(campaignId: string, enabled: boolean) {
+    const { admin } = await campaignAccess()
+    if (enabled && !(await isCampaignSchedulerReady(admin))) {
+        return { error: "Automatic sending is not configured on the server. Use the small manual test batch first." }
+    }
+    const { data, error } = await admin.from("whatsapp_campaigns")
+        .update({ auto_send: enabled, updated_at: new Date().toISOString() })
+        .eq("id", campaignId).eq("status", "sending").not("audience_id", "is", null).select("id").maybeSingle()
+    if (error || !data) return { error: "This campaign cannot be changed right now." }
+    revalidatePath("/dashboard/whatsapp")
+    return { success: true as const }
+}
+
+export async function getCampaignProblems(campaignId: string) {
+    try {
+        const { admin } = await campaignAccess()
+        const [campaign, recipients] = await Promise.all([
+            admin.from("whatsapp_campaigns").select("last_error,last_error_at,last_worker_run_at").eq("id", campaignId).single(),
+            admin.from("whatsapp_campaign_recipients")
+                .select("phone,status,error_message,updated_at", { count: "exact" })
+                .eq("campaign_id", campaignId).in("status", ["failed", "skipped", "uncertain"])
+                .order("updated_at", { ascending: false }).limit(30),
+        ])
+        if (campaign.error || recipients.error || !campaign.data) return { error: "Could not load campaign problems." }
+        return {
+            lastError: campaign.data.last_error as string | null,
+            lastErrorAt: campaign.data.last_error_at as string | null,
+            lastWorkerRunAt: campaign.data.last_worker_run_at as string | null,
+            total: recipients.count ?? 0,
+            problems: (recipients.data ?? []).map((row) => ({
+                phone: `••••${row.phone.slice(-4)}`,
+                status: row.status as string,
+                reason: row.error_message ?? "No reason was recorded.",
+                updatedAt: row.updated_at as string,
+            })),
+        }
+    } catch {
+        return { error: "Could not load campaign problems." }
+    }
+}
+
 export async function resumeAudienceCampaign(campaignId: string) {
     try {
-        if (process.env.CAMPAIGN_WORKER_ENABLED !== "true" || !process.env.CRON_SECRET || process.env.CRON_SECRET.length < 32) {
-            return { error: "The protected campaign worker is not configured." }
-        }
         const { admin } = await campaignAccess()
         const [campaign, remaining] = await Promise.all([
             admin.from("whatsapp_campaigns").select("id,status,audience_id").eq("id", campaignId).single(),
@@ -196,7 +248,7 @@ export async function resumeAudienceCampaign(campaignId: string) {
             return { error: "This campaign has no queued recipients to resume." }
         }
         const result = await admin.from("whatsapp_campaigns")
-            .update({ status: "sending", updated_at: new Date().toISOString() }).eq("id", campaignId).eq("status", "failed")
+            .update({ status: "sending", auto_send: false, last_error: null, last_error_at: null, updated_at: new Date().toISOString() }).eq("id", campaignId).eq("status", "failed")
         if (result.error) return { error: result.error.message }
         revalidatePath("/dashboard/whatsapp")
         return { success: true as const }

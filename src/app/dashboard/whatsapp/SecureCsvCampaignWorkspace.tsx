@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import {
-    getCampaignReadiness, listSavedAudiences, previewDatabaseAudience, previewSavedAudience,
-    queueAudienceCampaign, resumeAudienceCampaign, saveDatabaseAudience, type AudienceFilters, type AudiencePreviewRow,
+    getCampaignProblems, getCampaignReadiness, listSavedAudiences, previewDatabaseAudience, previewSavedAudience,
+    queueAudienceCampaign, resumeAudienceCampaign, runTestCampaignBatch, saveDatabaseAudience, setCampaignAutoSend, type AudienceFilters, type AudiencePreviewRow,
     type AudienceSummary,
 } from "./audience-actions"
 import type { WhatsAppCampaignRecord, WhatsAppTemplateRecord } from "./actions"
@@ -72,6 +72,69 @@ function csvHeaders(sample: string) {
     }
     headers.push(value.trim())
     return headers.filter(Boolean)
+}
+
+type Problems = {
+    lastError: string | null
+    lastErrorAt: string | null
+    lastWorkerRunAt: string | null
+    total: number
+    problems: Array<{ phone: string; status: string; reason: string; updatedAt: string }>
+}
+
+function CampaignProgressCard({ campaign, workerConfigured }: { campaign: WhatsAppCampaignRecord; workerConfigured: boolean }) {
+    const router = useRouter()
+    const [busy, startTransition] = useTransition()
+    const [problems, setProblems] = useState<Problems | null>(null)
+    const [showProblems, setShowProblems] = useState(false)
+    const [now, setNow] = useState(() => Date.now())
+    const remaining = Math.max(0, campaign.recipientCount - campaign.sentCount - campaign.failedCount - campaign.skippedCount)
+    const workerStale = campaign.autoSend && campaign.status === "sending" && now - Math.max(Date.parse(campaign.lastWorkerRunAt ?? campaign.updatedAt), Date.parse(campaign.updatedAt)) > 5 * 60_000
+    useEffect(() => {
+        const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+        return () => window.clearInterval(timer)
+    }, [])
+    const refreshProblems = async () => {
+        const result = await getCampaignProblems(campaign.id)
+        if (result.error) return toast.error(result.error)
+        setProblems(result as Problems)
+        setShowProblems(true)
+    }
+    const runBatch = () => {
+        if (!window.confirm(`Send the next small batch (up to 5 people) for “${campaign.name}”? This sends real WhatsApp messages.`)) return
+        startTransition(() => void runTestCampaignBatch(campaign.id).then((result) => {
+            if (result.error) { toast.error(result.error); void refreshProblems() }
+            else toast.success(result.pausedForQuota ? "RSS allowance is full. The remaining people are waiting." : `${result.processed ?? 0} recipient(s) processed.`)
+            router.refresh()
+        }).catch(() => toast.error("The test batch could not run.")))
+    }
+    const changeAuto = (enabled: boolean) => {
+        if (enabled && !window.confirm(`Start automatic batches for “${campaign.name}”? Real messages will be sent to the remaining eligible people.`)) return
+        startTransition(() => void setCampaignAutoSend(campaign.id, enabled).then((result) => {
+            if (result.error) toast.error(result.error)
+            else { toast.success(enabled ? "Automatic batches started." : "Automatic batches paused."); router.refresh() }
+        }).catch(() => toast.error("Could not change automatic sending.")))
+    }
+    return <div className="rounded-xl border p-4">
+        <div className="flex justify-between gap-3"><div><p className="font-bold">{campaign.name}</p><p className="text-xs text-gray-500">{campaign.templateName ?? "Template"} · {campaign.autoSend ? "Automatic batches on" : "Manual batches"}</p></div><Badge>{campaign.status}</Badge></div>
+        <div className="mt-4 h-2 rounded-full bg-gray-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${campaign.recipientCount ? Math.min(100, (campaign.sentCount + campaign.failedCount + campaign.skippedCount) / campaign.recipientCount * 100) : 0}%` }} /></div>
+        <p className="mt-2 text-xs text-gray-500">{campaign.sentCount} accepted by Meta · {campaign.failedCount} failed · {campaign.skippedCount} skipped / needs review · {remaining} waiting</p>
+        {campaign.lastError ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-800">Last worker problem: {campaign.lastError}</p> : null}
+        {workerStale ? <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Automatic batches have not progressed for over 5 minutes. Check the scheduler and pause this campaign if needed.</p> : null}
+        <div className="mt-3 flex flex-wrap gap-2">
+            {campaign.status === "sending" && remaining > 0 ? <Button variant="outline" size="sm" disabled={busy || campaign.autoSend} onClick={runBatch}>Send next 5 as test</Button> : null}
+            {campaign.status === "sending" && remaining > 0 && workerConfigured ? <Button variant="outline" size="sm" disabled={busy} onClick={() => changeAuto(!campaign.autoSend)}>{campaign.autoSend ? "Pause automatic batches" : "Start automatic batches"}</Button> : null}
+            {campaign.status === "failed" && remaining > 0 ? <Button variant="outline" size="sm" disabled={busy} onClick={() => startTransition(() => void resumeAudienceCampaign(campaign.id).then((result) => result.error ? toast.error(result.error) : (toast.success("Remaining recipients are ready again."), router.refresh())))}>Resume remaining</Button> : null}
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => void refreshProblems()}>{showProblems ? "Refresh problems" : "See send problems"}</Button>
+        </div>
+        {showProblems && problems ? <div className="mt-4 rounded-xl bg-gray-50 p-4 text-xs dark:bg-zinc-800">
+            <p className="font-bold">{problems.total} recipients need review (showing up to 30)</p>
+            {problems.lastWorkerRunAt ? <p className="mt-1 text-gray-500">Worker last ran {new Date(problems.lastWorkerRunAt).toLocaleString()}</p> : <p className="mt-1 text-gray-500">Worker has not run yet.</p>}
+            {problems.lastError ? <p className="mt-2 text-red-700">Campaign error: {problems.lastError}</p> : null}
+            <div className="mt-2 max-h-56 overflow-auto divide-y">{problems.problems.map((item, index) => <div key={`${item.phone}:${index}`} className="py-2"><strong>{item.phone} · {item.status}</strong><p className="mt-1 text-gray-600 dark:text-zinc-300">{item.reason}</p></div>)}</div>
+            {!problems.total && !problems.lastError ? <p className="mt-2 text-gray-500">No send problems recorded.</p> : null}
+        </div> : null}
+    </div>
 }
 
 export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerConfigured }: {
@@ -226,13 +289,13 @@ export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerC
     }
     function queue() {
         if (!selectedAudience || !selectedTemplate || !ready) return
-        if (!window.confirm(`Queue this approved template for ${ready.toLocaleString()} consented people? Sending happens in the background.`)) return
+        if (!window.confirm(`Prepare this approved template for ${ready.toLocaleString()} eligible people? No message is sent until you start a test batch or automatic sending.`)) return
         startTransition(() => void queueAudienceCampaign({
             audienceId: selectedAudience.id, templateId: selectedTemplate.id, name: campaignName,
             mapping, requestKey,
         }).then((result) => {
             if (result.error) return toast.error(result.error)
-            toast.success("Campaign queued. Watch progress below.")
+            toast.success("Campaign prepared. Use Send next 5 as test to begin.")
             setRequestKey(crypto.randomUUID())
             router.refresh()
         }).catch(() => toast.error("Could not queue campaign.")))
@@ -268,12 +331,12 @@ export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerC
     return <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
         <section className="rounded-[2rem] border bg-white p-6 dark:bg-zinc-900">
             <p className="text-xs font-bold uppercase tracking-wide text-[#128C7E]">Campaign</p><h2 className="mt-2 text-3xl font-black">Choose, check, queue</h2><p className="mt-2 text-sm text-gray-500">Only audience and template IDs go from this page to the server. Recipient rows stay in Supabase.</p>
-            {!workerConfigured ? <div className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Background worker setup is incomplete. Sending is disabled until the server’s CRON_SECRET is configured.</div> : null}
+            {!workerConfigured ? <div className="mt-5 rounded-xl bg-amber-50 p-4 text-sm text-amber-950">Automatic batches are not connected yet. You can prepare a campaign and run a small, confirmed test batch manually.</div> : null}
             <div className="mt-6 space-y-5"><label className="block space-y-2"><span className="font-bold">1. Campaign name</span><Input value={campaignName} onChange={(event) => setCampaignName(event.target.value)} placeholder="Ready orders — September" /></label><label className="block space-y-2"><span className="font-bold">2. Approved message</span><select className="h-12 w-full rounded-xl border bg-background px-3" value={templateId} onChange={(event) => { setTemplateId(event.target.value); setMapping({}); setReady(null) }}><option value="">Choose template</option>{templates.filter((item) => item.status === "approved").map((item) => <option key={item.id} value={item.id}>{item.displayName}</option>)}</select></label><label className="block space-y-2"><span className="font-bold">3. Saved audience</span><select className="h-12 w-full rounded-xl border bg-background px-3" value={audienceId} onChange={(event) => { setAudienceId(event.target.value); setMapping({}); setReady(null) }}><option value="">Choose audience</option>{audiences.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.rowCount} unique numbers</option>)}</select>{!audiences.length ? <small className="text-amber-600">Save an audience in CSV Builder first.</small> : null}</label>
                 {selectedTemplate && selectedAudience ? <><div className="rounded-2xl bg-gray-50 p-5 dark:bg-zinc-800"><p className="font-bold">4. Match personal details</p><div className="mt-3 space-y-3">{selectedTemplate.variables.map((variable) => <label className="grid items-center gap-2 sm:grid-cols-2" key={variable.name}><span>{labels[variable.name] ?? variable.name.replace(/_/g, " ")}</span><select className="h-11 rounded-xl border bg-background px-3" value={mapping[variable.name] ?? ""} onChange={(event) => { setReady(null); setMapping((current) => ({ ...current, [variable.name]: event.target.value })) }}><option value="">Choose a CSV column</option>{selectedAudience.columns.map((column) => <option key={column} value={column}>{labels[column] ?? column}</option>)}</select></label>)}</div></div><div className="rounded-xl border border-emerald-100 p-4"><div className="flex justify-between"><strong>5. Review</strong><Badge className="bg-emerald-100 text-emerald-700">{ready ?? "…"} ready</Badge></div><p className="mt-3 whitespace-pre-wrap text-sm">{selectedTemplate.body.replace(/\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g, (_, variable: string) => sample?.fields[mapping[variable]] || `[${variable.replace(/_/g, " ")}]`)}</p><p className="mt-3 text-xs text-gray-500">Snapshot: {selectedAudience.rowCount} unique numbers; {selectedAudience.consentCount} consented. The server checks missing values and consent before sending. The preview shows only one sample.</p></div></> : null}
-                <Button className="h-12 w-full bg-[#25D366] font-bold text-white hover:bg-[#20bd5a]" disabled={isPending || !workerConfigured || !campaignName.trim() || !selectedAudience || !selectedTemplate || !ready} onClick={queue}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Queue for {ready ?? 0} people</Button>
+                <Button className="h-12 w-full bg-[#25D366] font-bold text-white hover:bg-[#20bd5a]" disabled={isPending || !campaignName.trim() || !selectedAudience || !selectedTemplate || !ready} onClick={queue}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Prepare {ready ?? 0} people — do not send yet</Button>
             </div>
         </section>
-        <section className="rounded-[2rem] border bg-white p-6 dark:bg-zinc-900"><h2 className="text-xl font-black">Campaign progress</h2><p className="mt-1 text-sm text-gray-500">Updates automatically every 15 seconds while a campaign is sending.</p><div className="mt-5 space-y-3">{campaigns.length ? campaigns.map((campaign) => <div key={campaign.id} className="rounded-xl border p-4"><div className="flex justify-between gap-3"><div><p className="font-bold">{campaign.name}</p><p className="text-xs text-gray-500">{campaign.templateName ?? "Template"}</p></div><Badge>{campaign.status}</Badge></div><div className="mt-4 h-2 rounded-full bg-gray-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${campaign.recipientCount ? Math.min(100, (campaign.sentCount + campaign.failedCount + campaign.skippedCount) / campaign.recipientCount * 100) : 0}%` }} /></div><p className="mt-2 text-xs text-gray-500">{campaign.sentCount} sent · {campaign.failedCount} failed · {campaign.skippedCount} skipped / needs review · {Math.max(0, campaign.recipientCount - campaign.sentCount - campaign.failedCount - campaign.skippedCount)} remaining</p>{campaign.status === "failed" && campaign.recipientCount > campaign.sentCount + campaign.failedCount + campaign.skippedCount ? <Button variant="outline" size="sm" className="mt-3" disabled={isPending || !workerConfigured} onClick={() => startTransition(() => void resumeAudienceCampaign(campaign.id).then((result) => result.error ? toast.error(result.error) : (toast.success("Remaining recipients queued again."), router.refresh())))}>Resume remaining</Button> : null}</div>) : <p className="py-8 text-sm text-gray-500">No campaigns yet.</p>}</div></section>
+        <section className="rounded-[2rem] border bg-white p-6 dark:bg-zinc-900"><h2 className="text-xl font-black">Campaign progress</h2><p className="mt-1 text-sm text-gray-500">See who is waiting and exactly why a send failed or was skipped. Progress refreshes every 15 seconds.</p><div className="mt-5 space-y-3">{campaigns.length ? campaigns.map((campaign) => <CampaignProgressCard key={campaign.id} campaign={campaign} workerConfigured={workerConfigured} />) : <p className="py-8 text-sm text-gray-500">No campaigns yet.</p>}</div></section>
     </div>
 }

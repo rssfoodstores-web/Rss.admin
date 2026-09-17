@@ -5,6 +5,7 @@ import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { readWhatsAppHealth, type WhatsAppHealthSnapshot } from "@/lib/whatsapp-health"
 import { getWhatsAppQuotaStatus, type WhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
+import { isCampaignSchedulerReady } from "@/lib/whatsapp-campaign-worker"
 import {
     encryptCredential,
     extractTemplateVariables,
@@ -68,17 +69,21 @@ export interface WhatsAppTemplateRecord {
 }
 
 export interface WhatsAppCampaignRecord {
+    autoSend: boolean
     createdAt: string
     deliveredCount: number
     failedCount: number
     skippedCount: number
     id: string
+    lastError: string | null
+    lastWorkerRunAt: string | null
     name: string
     readCount: number
     recipientCount: number
     sentCount: number
     status: "cancelled" | "completed" | "draft" | "failed" | "scheduled" | "sending"
     templateName: string | null
+    updatedAt: string
 }
 
 export interface WhatsAppMessageRecord {
@@ -137,6 +142,7 @@ export async function getWhatsAppSendAllowance(): Promise<WhatsAppQuotaStatus> {
 export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
     const context = await getWhatsAppContext()
     const connection = await loadWhatsAppConnection(context.adminSupabase)
+    const campaignWorkerConfigured = await isCampaignSchedulerReady(context.adminSupabase)
     const { data: rows, error } = await context.adminSupabase
         .from("whatsapp_templates")
         .select("name,language,status")
@@ -151,7 +157,7 @@ export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
             phone: { display: null, verifiedName: null, verification: null, quality: null, status: null, error: "Meta access token is missing." },
             account: { name: null, messagingLimit: null, error: "Meta access token is missing." },
             templates: { items: [], error: "Meta access token is missing.", truncated: false, localOnly: [] },
-            rss: { connectionActive: connection.isActive, campaignWorkerConfigured: process.env.CAMPAIGN_WORKER_ENABLED === "true" && Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32), deliveryTracking: "Not verified — RSS has not confirmed Meta delivery-status webhooks.", consentTracking: "Not verified — an opted-in flag alone is not proof of when or how permission was given." },
+            rss: { connectionActive: connection.isActive, campaignWorkerConfigured, deliveryTracking: "Not verified — RSS has not confirmed Meta delivery-status webhooks.", consentTracking: "Not verified — an opted-in flag alone is not proof of when or how permission was given." },
         }
     }
     return readWhatsAppHealth({
@@ -160,7 +166,7 @@ export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
         wabaId: connection.wabaId,
         phoneId: connection.phoneNumberId,
         connectionActive: connection.isActive,
-        campaignWorkerConfigured: process.env.CAMPAIGN_WORKER_ENABLED === "true" && Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
+        campaignWorkerConfigured,
         localTemplates,
     })
 }
@@ -294,7 +300,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         admin.from("whatsapp_connections").select("account_label, graph_api_version, api_token_ciphertext, meta_access_token_ciphertext, is_active, last_test_message, last_test_status, last_tested_at, phone_number_id, waba_id, webhook_secret").eq("id", "primary").maybeSingle(),
         admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active").order("updated_at", { ascending: false }).limit(250),
         admin.from("whatsapp_templates").select("id, name, display_name, category, language, body, variables, status, external_template_id, rejection_reason, created_at").order("updated_at", { ascending: false }).limit(100),
-        admin.from("whatsapp_campaigns").select("id, name, status, recipient_count, sent_count, delivered_count, read_count, failed_count, skipped_count, created_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
+        admin.from("whatsapp_campaigns").select("id, name, status, auto_send, last_error, last_worker_run_at, recipient_count, sent_count, delivered_count, read_count, failed_count, skipped_count, created_at, updated_at, whatsapp_templates(name)").order("created_at", { ascending: false }).limit(50),
         admin.from("whatsapp_messages").select("id, contact_id, body, direction, status, error_message, sent_by, created_at, whatsapp_contacts(full_name)").order("created_at", { ascending: false }).limit(1000),
         admin.from("audit_logs").select("entity_id, created_at").eq("action", "submit_whatsapp_template").order("created_at", { ascending: true }).limit(500),
         admin.from("whatsapp_conversation_assignments").select("contact_id, assigned_to, status"),
@@ -334,17 +340,21 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
     const campaigns = (campaignsResult.data ?? []).map((row) => {
         const relation = Array.isArray(row.whatsapp_templates) ? row.whatsapp_templates[0] : row.whatsapp_templates
         return {
+            autoSend: Boolean(row.auto_send),
             createdAt: row.created_at,
             deliveredCount: row.delivered_count,
             failedCount: row.failed_count,
             skippedCount: row.skipped_count,
             id: row.id,
+            lastError: row.last_error ?? null,
+            lastWorkerRunAt: row.last_worker_run_at ?? null,
             name: row.name,
             readCount: row.read_count,
             recipientCount: row.recipient_count,
             sentCount: row.sent_count,
             status: row.status as WhatsAppCampaignRecord["status"],
             templateName: relation?.name ?? null,
+            updatedAt: row.updated_at,
         }
     })
     const messages = (messagesResult.data ?? []).map((row) => {
@@ -395,9 +405,11 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         status: row.status as WhatsAppConversationAssignment["status"],
     }))
 
+    const campaignWorkerConfigured = await isCampaignSchedulerReady(admin)
+
     return {
         access: context.whatsappAccess,
-        campaignWorkerConfigured: Boolean(process.env.CAMPAIGN_WORKER_ENABLED === "true" && process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
+        campaignWorkerConfigured,
         campaigns,
         connection: connectionRow ? {
             accountLabel: connectionRow.account_label,
