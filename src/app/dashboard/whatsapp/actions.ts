@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { readWhatsAppHealth, type WhatsAppHealthSnapshot } from "@/lib/whatsapp-health"
 import {
     encryptCredential,
     extractTemplateVariables,
@@ -125,6 +126,37 @@ export interface WhatsAppCenterPageData {
     }
     team: WhatsAppTeamRecord[]
     templates: WhatsAppTemplateRecord[]
+}
+
+export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
+    const context = await getWhatsAppContext()
+    const connection = await loadWhatsAppConnection(context.adminSupabase)
+    const { data: rows, error } = await context.adminSupabase
+        .from("whatsapp_templates")
+        .select("name,language,status")
+        .limit(1000)
+    if (error) throw new Error("Unable to load RSS template list.")
+    const localTemplates = (rows ?? []).map((row) => ({
+        name: row.name, language: row.language, status: row.status,
+    })) as WhatsAppTemplateRecord[]
+    if (!connection.metaAccessToken) {
+        return {
+            checkedAt: new Date().toISOString(),
+            phone: { display: null, verifiedName: null, verification: null, quality: null, status: null, error: "Meta access token is missing." },
+            account: { name: null, messagingLimit: null, error: "Meta access token is missing." },
+            templates: { items: [], error: "Meta access token is missing.", truncated: false, localOnly: [] },
+            rss: { connectionActive: connection.isActive, campaignWorkerConfigured: process.env.CAMPAIGN_WORKER_ENABLED === "true" && Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32), deliveryTracking: "Not verified — RSS has not confirmed Meta delivery-status webhooks.", consentTracking: "Not verified — an opted-in flag alone is not proof of when or how permission was given." },
+        }
+    }
+    return readWhatsAppHealth({
+        version: connection.graphApiVersion,
+        token: connection.metaAccessToken,
+        wabaId: connection.wabaId,
+        phoneId: connection.phoneNumberId,
+        connectionActive: connection.isActive,
+        campaignWorkerConfigured: process.env.CAMPAIGN_WORKER_ENABLED === "true" && Boolean(process.env.CRON_SECRET && process.env.CRON_SECRET.length >= 32),
+        localTemplates,
+    })
 }
 
 

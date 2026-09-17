@@ -32,15 +32,17 @@ import {
     type WhatsAppTeamRecord,
 } from "./actions"
 import { ChatWorkspace } from "./ChatWorkspace"
+import { AccountHealthWorkspace } from "./AccountHealthWorkspace"
 import { SecureCsvCampaignWorkspace } from "./SecureCsvCampaignWorkspace"
 import { TemplateWorkspace } from "./TemplateWorkspace"
 
-type TabKey = "builder" | "campaigns" | "contacts" | "home" | "send" | "settings" | "templates"
+type TabKey = "builder" | "campaigns" | "contacts" | "health" | "home" | "send" | "settings" | "templates"
 
 const tabs: Array<{ icon: typeof LayoutDashboard; key: TabKey; label: string }> = [
     { icon: LayoutDashboard, key: "home", label: "Home" },
     { icon: MessageCircleMore, key: "send", label: "Chat with customers" },
     { icon: Sparkles, key: "templates", label: "Templates" },
+    { icon: ShieldCheck, key: "health", label: "Account health" },
     { icon: ContactRound, key: "contacts", label: "Customers" },
     { icon: FileSpreadsheet, key: "builder", label: "CSV Builder" },
     { icon: Activity, key: "campaigns", label: "Campaigns" },
@@ -302,6 +304,8 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
             {activeTab === "send" ? <ChatWorkspace data={initialData} /> : null}
 
             {activeTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
+
+            {activeTab === "health" ? <AccountHealthWorkspace /> : null}
 
             {activeTab === "contacts" ? (
                 <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
