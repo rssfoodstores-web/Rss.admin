@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
-import { isCampaignSchedulerReady, recordCampaignWorkerFailure, runWhatsAppCampaignBatch } from "@/lib/whatsapp-campaign-worker"
+import { campaignRecipientCounts, isCampaignSchedulerReady, recordCampaignWorkerFailure, runWhatsAppCampaignBatch } from "@/lib/whatsapp-campaign-worker"
+import { getWhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
 
 export type AudienceFilters = {
     origin: "all" | "rss" | "admin" | "dashboard"
@@ -182,12 +183,32 @@ export async function queueAudienceCampaign(input: {
 export async function runTestCampaignBatch(campaignId: string) {
     const { admin } = await campaignAccess()
     const { data: campaign, error } = await admin.from("whatsapp_campaigns")
-        .select("id,status,audience_id,auto_send").eq("id", campaignId).single()
+        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count").eq("id", campaignId).single()
     if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send) return { error: "Pause automatic sending before running a manual test batch." }
+    if (campaign.last_worker_run_at && campaign.sent_count > 0) return { error: "The first test batch has already run. Choose the next number or automatic sending." }
     try {
         const result = await runWhatsAppCampaignBatch(admin, campaignId, 5)
         revalidatePath("/dashboard/whatsapp")
-        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota }
+        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
+    } catch (runError) {
+        await recordCampaignWorkerFailure(admin, campaignId, runError)
+        revalidatePath("/dashboard/whatsapp")
+        return { error: "The batch stopped. Open campaign problems to see why; no automatic retry was started." }
+    }
+}
+
+export async function runManualCampaignBatch(campaignId: string, count: number) {
+    const { admin } = await campaignAccess()
+    if (!Number.isSafeInteger(count) || count < 1 || count > 5) return { error: "Choose between 1 and 5 people for each batch." }
+    const { data: campaign, error } = await admin.from("whatsapp_campaigns")
+        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count").eq("id", campaignId).single()
+    if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send || !campaign.last_worker_run_at || campaign.sent_count < 1) {
+        return { error: "Run the first 5-person test before choosing another manual batch." }
+    }
+    try {
+        const result = await runWhatsAppCampaignBatch(admin, campaignId, count)
+        revalidatePath("/dashboard/whatsapp")
+        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
     } catch (runError) {
         await recordCampaignWorkerFailure(admin, campaignId, runError)
         revalidatePath("/dashboard/whatsapp")
@@ -198,7 +219,15 @@ export async function runTestCampaignBatch(campaignId: string) {
 export async function setCampaignAutoSend(campaignId: string, enabled: boolean) {
     const { admin } = await campaignAccess()
     if (enabled && !(await isCampaignSchedulerReady(admin))) {
-        return { error: "Automatic sending is not configured on the server. Use the small manual test batch first." }
+        return { error: "Automatic sending is not configured on the server. Continue with confirmed manual batches for now." }
+    }
+    if (enabled) {
+        const [{ data: campaign, error }, quota] = await Promise.all([
+            admin.from("whatsapp_campaigns").select("last_worker_run_at,sent_count").eq("id", campaignId).single(),
+            getWhatsAppQuotaStatus(),
+        ])
+        if (error || !campaign?.last_worker_run_at || campaign.sent_count < 1) return { error: "Send and review the first 5-person test before enabling automatic batches." }
+        if (quota.remaining < 1) return { error: "RSS allowance is full. Wait for the countdown, then an admin must continue manually." }
     }
     const { data, error } = await admin.from("whatsapp_campaigns")
         .update({ auto_send: enabled, updated_at: new Date().toISOString() })
@@ -206,6 +235,28 @@ export async function setCampaignAutoSend(campaignId: string, enabled: boolean) 
     if (error || !data) return { error: "This campaign cannot be changed right now." }
     revalidatePath("/dashboard/whatsapp")
     return { success: true as const }
+}
+
+export async function cancelAudienceCampaign(campaignId: string) {
+    try {
+        const { admin } = await campaignAccess()
+        const { data, error } = await admin.from("whatsapp_campaigns")
+            .update({ status: "cancelled", auto_send: false, updated_at: new Date().toISOString() })
+            .eq("id", campaignId).in("status", ["sending", "failed"]).not("audience_id", "is", null)
+            .select("id").maybeSingle()
+        if (error || !data) return { error: "This campaign cannot be cancelled now." }
+        const stopped = await admin.from("whatsapp_campaign_recipients")
+            .update({ status: "skipped", error_message: "Campaign cancelled by an admin before sending.", updated_at: new Date().toISOString() })
+            .eq("campaign_id", campaignId).eq("status", "queued")
+        if (stopped.error) return { error: "Campaign stopped, but some waiting rows could not be marked cancelled. Contact support before using it again." }
+        const counts = await campaignRecipientCounts(admin, campaignId)
+        const updated = await admin.from("whatsapp_campaigns").update({ sent_count: counts.sent, failed_count: counts.failed, skipped_count: counts.skipped + counts.uncertain }).eq("id", campaignId).eq("status", "cancelled")
+        if (updated.error) return { error: "Campaign stopped, but its progress count could not be refreshed. Reload the page before taking another action." }
+        revalidatePath("/dashboard/whatsapp")
+        return { success: true as const }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Could not cancel this campaign." }
+    }
 }
 
 export async function getCampaignProblems(campaignId: string) {

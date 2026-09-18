@@ -2,7 +2,7 @@ import "server-only"
 
 import { createAdminClient } from "@/lib/supabase/admin"
 import { normalizeWhatsAppPhone, renderTemplate, sendMetaTemplateMessage, type WhatsAppTemplateVariable } from "@/lib/whatsapp-center"
-import { WhatsAppQuotaExceededError } from "@/lib/whatsapp-quota"
+import { getWhatsAppQuotaStatus, WhatsAppQuotaExceededError } from "@/lib/whatsapp-quota"
 
 type Admin = ReturnType<typeof createAdminClient>
 type Recipient = { id: string; phone: string; contact_id: string | null; fields: Record<string, string> }
@@ -57,6 +57,8 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
     let lastError: string | null = null
 
     for (const row of batch) {
+        const { data: currentCampaign, error: statusError } = await admin.from("whatsapp_campaigns").select("status").eq("id", campaignId).single()
+        if (statusError) throw new Error("Could not confirm the campaign is still active.")
         const contact = contactByPhone.get(row.phone)
         const values = variables.map((variable) => row.fields[mapping[variable.name]]?.trim() ?? "")
         const phone = normalizeWhatsAppPhone(row.phone)
@@ -64,7 +66,9 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
         let errorMessage: string | null = null
         let externalId: string | null = null
 
-        if (pausedForQuota || rateLimited) {
+        if (currentCampaign.status !== "sending") {
+            result = "skipped"; errorMessage = "Campaign cancelled before this message was sent."
+        } else if (pausedForQuota || rateLimited) {
             errorMessage = pausedForQuota ? "Waiting for the next RSS send slot." : "Paused after Meta rate-limited this campaign."
         } else if (contact && (!contact.opted_in || !contact.is_active)) {
             result = "skipped"; errorMessage = "Contact withdrew WhatsApp permission or became inactive."
@@ -112,18 +116,36 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
     }
 
     const latest = await campaignRecipientCounts(admin, campaignId)
+    if (!pausedForQuota && latest.queued + latest.processing > 0) {
+        const quota = await getWhatsAppQuotaStatus()
+        if (quota.remaining === 0) pausedForQuota = true
+    }
     const status = rateLimited ? "failed" : latest.queued + latest.processing === 0 ? (latest.uncertain ? "failed" : latest.sent ? "completed" : "failed") : "sending"
     const update: Record<string, unknown> = {
         sent_count: latest.sent, failed_count: latest.failed, skipped_count: latest.skipped + latest.uncertain,
         status, last_worker_run_at: new Date().toISOString(), updated_at: new Date().toISOString(),
     }
-    if (status !== "sending") update.auto_send = false
-    if (lastError || rateLimited) {
+    if (status !== "sending" || pausedForQuota || rateLimited) update.auto_send = false
+    if (pausedForQuota) {
+        update.last_error = "RSS send allowance full. The remaining people are waiting for an admin to continue after the countdown."
+        update.last_error_at = new Date().toISOString()
+    } else if (lastError || rateLimited) {
         update.last_error = lastError ?? "Meta rate-limited this campaign."
         update.last_error_at = new Date().toISOString()
+    } else if (campaign.auto_send || mode === "manual") {
+        update.last_error = null
+        update.last_error_at = null
     }
-    const { error: campaignUpdateError } = await admin.from("whatsapp_campaigns").update(update).eq("id", campaignId)
+    const { data: updatedCampaign, error: campaignUpdateError } = await admin.from("whatsapp_campaigns")
+        .update(update).eq("id", campaignId).eq("status", "sending").select("id").maybeSingle()
     if (campaignUpdateError) throw new Error(campaignUpdateError.message)
+    if (!updatedCampaign) {
+        // A cancellation can race with one request already in flight. Preserve the cancelled state while showing its final counts.
+        const cancelledUpdate = await admin.from("whatsapp_campaigns")
+            .update({ sent_count: latest.sent, failed_count: latest.failed, skipped_count: latest.skipped + latest.uncertain, updated_at: new Date().toISOString() })
+            .eq("id", campaignId).eq("status", "cancelled")
+        if (cancelledUpdate.error) throw new Error(cancelledUpdate.error.message)
+    }
     return { claimed, pausedForQuota, rateLimited }
 }
 

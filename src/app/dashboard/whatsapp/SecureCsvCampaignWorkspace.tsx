@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import {
-    getCampaignProblems, getCampaignReadiness, listSavedAudiences, previewDatabaseAudience, previewSavedAudience,
-    queueAudienceCampaign, resumeAudienceCampaign, runTestCampaignBatch, saveDatabaseAudience, setCampaignAutoSend, type AudienceFilters, type AudiencePreviewRow,
+    cancelAudienceCampaign, getCampaignProblems, getCampaignReadiness, listSavedAudiences, previewDatabaseAudience, previewSavedAudience,
+    queueAudienceCampaign, resumeAudienceCampaign, runManualCampaignBatch, runTestCampaignBatch, saveDatabaseAudience, setCampaignAutoSend, type AudienceFilters, type AudiencePreviewRow,
     type AudienceSummary,
 } from "./audience-actions"
+import { getWhatsAppSendAllowance } from "./actions"
 import type { WhatsAppCampaignRecord, WhatsAppTemplateRecord } from "./actions"
+import type { WhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
 
 const roles = ["customer", "rider", "merchant", "agent", "admin", "sub_admin", "supa_admin"]
 const labels: Record<string, string> = {
@@ -82,16 +84,29 @@ type Problems = {
     problems: Array<{ phone: string; status: string; reason: string; updatedAt: string }>
 }
 
-function CampaignProgressCard({ campaign, workerConfigured }: { campaign: WhatsAppCampaignRecord; workerConfigured: boolean }) {
+function allowanceCountdown(value: string | null, now: number) {
+    if (!value) return "Waiting for the next slot"
+    const seconds = Math.max(0, Math.ceil((Date.parse(value) - now) / 1000))
+    if (!Number.isFinite(seconds)) return "Waiting for the next slot"
+    return `${Math.floor(seconds / 3600)}h ${String(Math.floor(seconds % 3600 / 60)).padStart(2, "0")}m ${String(seconds % 60).padStart(2, "0")}s`
+}
+
+function CampaignProgressCard({ campaign, quota, workerConfigured }: { campaign: WhatsAppCampaignRecord; quota: WhatsAppQuotaStatus | null; workerConfigured: boolean }) {
     const router = useRouter()
     const [busy, startTransition] = useTransition()
+    const [manualSending, setManualSending] = useState(false)
+    const [chosenCount, setChosenCount] = useState("10")
+    const [manualProgress, setManualProgress] = useState(0)
     const [problems, setProblems] = useState<Problems | null>(null)
     const [showProblems, setShowProblems] = useState(false)
     const [now, setNow] = useState(() => Date.now())
     const remaining = Math.max(0, campaign.recipientCount - campaign.sentCount - campaign.failedCount - campaign.skippedCount)
+    const testDone = Boolean(campaign.lastWorkerRunAt && campaign.sentCount > 0)
+    const quotaFull = quota?.remaining === 0
+    const quotaPaused = campaign.lastError?.startsWith("RSS send allowance full.") ?? false
     const workerStale = campaign.autoSend && campaign.status === "sending" && now - Math.max(Date.parse(campaign.lastWorkerRunAt ?? campaign.updatedAt), Date.parse(campaign.updatedAt)) > 5 * 60_000
     useEffect(() => {
-        const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+        const timer = window.setInterval(() => setNow(Date.now()), 1_000)
         return () => window.clearInterval(timer)
     }, [])
     const refreshProblems = async () => {
@@ -104,9 +119,35 @@ function CampaignProgressCard({ campaign, workerConfigured }: { campaign: WhatsA
         if (!window.confirm(`Send the next small batch (up to 5 people) for “${campaign.name}”? This sends real WhatsApp messages.`)) return
         startTransition(() => void runTestCampaignBatch(campaign.id).then((result) => {
             if (result.error) { toast.error(result.error); void refreshProblems() }
-            else toast.success(result.pausedForQuota ? "RSS allowance is full. The remaining people are waiting." : `${result.processed ?? 0} recipient(s) processed.`)
+            else toast.success(result.pausedForQuota ? "RSS allowance is full. An admin must continue after the countdown." : `First test finished: ${result.processed ?? 0} recipient(s) processed. Check the results before continuing.`)
             router.refresh()
         }).catch(() => toast.error("The test batch could not run.")))
+    }
+    const sendChosenCount = async () => {
+        const count = Number(chosenCount)
+        if (!Number.isSafeInteger(count) || count < 1 || count > 250) return toast.error("Choose a whole number from 1 to 250.")
+        const target = Math.min(count, remaining)
+        if (!window.confirm(`Send the next ${target} real WhatsApp message(s) for “${campaign.name}”? Already-sent messages cannot be recalled.`)) return
+        setManualSending(true)
+        setManualProgress(0)
+        let processed = 0
+        try {
+            while (processed < target) {
+                const size = Math.min(5, target - processed)
+                const result = await runManualCampaignBatch(campaign.id, size)
+                if (result.error) { toast.error(result.error); void refreshProblems(); break }
+                processed += result.processed ?? 0
+                setManualProgress(processed)
+                if (result.pausedForQuota) { toast.warning("RSS allowance is full. Wait for the countdown, then an admin must continue."); break }
+                if (result.rateLimited) { toast.error("Meta rate-limited this campaign. See send problems before continuing."); break }
+                if (!result.processed || result.processed < size) break
+            }
+            if (processed) toast.success(`${processed} recipient(s) processed in this manual run.`)
+            router.refresh()
+        } catch {
+            toast.error("The manual run stopped. Review progress before trying again.")
+            router.refresh()
+        } finally { setManualSending(false) }
     }
     const changeAuto = (enabled: boolean) => {
         if (enabled && !window.confirm(`Start automatic batches for “${campaign.name}”? Real messages will be sent to the remaining eligible people.`)) return
@@ -115,18 +156,28 @@ function CampaignProgressCard({ campaign, workerConfigured }: { campaign: WhatsA
             else { toast.success(enabled ? "Automatic batches started." : "Automatic batches paused."); router.refresh() }
         }).catch(() => toast.error("Could not change automatic sending.")))
     }
+    const cancel = () => {
+        if (!window.confirm(`Cancel the remaining messages in “${campaign.name}”? Messages already accepted by Meta cannot be recalled. A message currently being sent may still finish.`)) return
+        startTransition(() => void cancelAudienceCampaign(campaign.id).then((result) => {
+            if (result.error) toast.error(result.error)
+            else { toast.success("Remaining unsent messages cancelled."); router.refresh() }
+        }).catch(() => toast.error("Could not cancel the campaign.")))
+    }
     return <div className="rounded-xl border p-4">
-        <div className="flex justify-between gap-3"><div><p className="font-bold">{campaign.name}</p><p className="text-xs text-gray-500">{campaign.templateName ?? "Template"} · {campaign.autoSend ? "Automatic batches on" : "Manual batches"}</p></div><Badge>{campaign.status}</Badge></div>
+        <div className="flex justify-between gap-3"><div><p className="font-bold">{campaign.name}</p><p className="text-xs text-gray-500">{campaign.templateName ?? "Template"} · {campaign.autoSend ? "Automatic batches on" : "Manual batches"}</p></div><Badge>{campaign.status === "sending" && !campaign.autoSend ? quotaPaused ? "Paused for allowance" : "Ready for your choice" : campaign.status}</Badge></div>
         <div className="mt-4 h-2 rounded-full bg-gray-100"><div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${campaign.recipientCount ? Math.min(100, (campaign.sentCount + campaign.failedCount + campaign.skippedCount) / campaign.recipientCount * 100) : 0}%` }} /></div>
         <p className="mt-2 text-xs text-gray-500">{campaign.sentCount} accepted by Meta · {campaign.failedCount} failed · {campaign.skippedCount} skipped / needs review · {remaining} waiting</p>
-        {campaign.lastError ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-800">Last worker problem: {campaign.lastError}</p> : null}
+        {campaign.lastError && !quotaPaused ? <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-xs text-red-800">Last worker problem: {campaign.lastError}</p> : null}
+        {campaign.status === "sending" && remaining > 0 && (quotaPaused || quotaFull) ? <div className="mt-3 rounded-xl bg-amber-50 p-3 text-sm text-amber-950"><strong>{quotaPaused ? "Sending stopped at the RSS allowance." : "The RSS allowance is full."}</strong><p className="mt-1 tabular-nums">{quotaFull ? `Next slot in ${allowanceCountdown(quota?.nextAvailableAt ?? null, now)}` : quota ? `${quota.remaining} slot(s) available now.` : "Checking the countdown…"}</p><p className="mt-1 text-xs">It will not restart automatically. An admin must choose Continue after a slot opens.</p></div> : null}
         {workerStale ? <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-900">Automatic batches have not progressed for over 5 minutes. Check the scheduler and pause this campaign if needed.</p> : null}
         <div className="mt-3 flex flex-wrap gap-2">
-            {campaign.status === "sending" && remaining > 0 ? <Button variant="outline" size="sm" disabled={busy || campaign.autoSend} onClick={runBatch}>Send next 5 as test</Button> : null}
-            {campaign.status === "sending" && remaining > 0 && workerConfigured ? <Button variant="outline" size="sm" disabled={busy} onClick={() => changeAuto(!campaign.autoSend)}>{campaign.autoSend ? "Pause automatic batches" : "Start automatic batches"}</Button> : null}
+            {campaign.status === "sending" && remaining > 0 && !testDone ? <Button variant="outline" size="sm" disabled={busy || manualSending || campaign.autoSend || quotaFull} onClick={runBatch}>1. Send first 5 as test</Button> : null}
+            {campaign.status === "sending" && remaining > 0 && campaign.autoSend ? <Button variant="outline" size="sm" disabled={busy} onClick={() => changeAuto(false)}>Pause automatic batches</Button> : null}
             {campaign.status === "failed" && remaining > 0 ? <Button variant="outline" size="sm" disabled={busy} onClick={() => startTransition(() => void resumeAudienceCampaign(campaign.id).then((result) => result.error ? toast.error(result.error) : (toast.success("Remaining recipients are ready again."), router.refresh())))}>Resume remaining</Button> : null}
+            {(campaign.status === "sending" || campaign.status === "failed") && remaining > 0 ? <Button variant="outline" size="sm" disabled={busy || manualSending} onClick={cancel}>Cancel remaining</Button> : null}
             <Button variant="outline" size="sm" disabled={busy} onClick={() => void refreshProblems()}>{showProblems ? "Refresh problems" : "See send problems"}</Button>
         </div>
+        {campaign.status === "sending" && remaining > 0 && testDone && !campaign.autoSend ? <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/50 p-4"><p className="font-bold">Choose what happens next</p><p className="mt-1 text-xs text-gray-600">Review the first test. Then choose one option. Every manual send is real.</p><div className="mt-3 flex flex-wrap items-end gap-2"><label className="text-xs font-bold">People to send next<Input className="mt-1 w-28 bg-white" type="number" min={1} max={250} step={1} value={chosenCount} onChange={(event) => setChosenCount(event.target.value)} /></label><Button size="sm" disabled={busy || manualSending || quotaFull} onClick={() => void sendChosenCount()}>{manualSending ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{manualProgress} processed…</> : quotaPaused ? "Continue manually" : "Send chosen number"}</Button><Button size="sm" variant="outline" disabled={busy || manualSending || quotaFull || !workerConfigured || campaign.sentCount < 1} onClick={() => changeAuto(true)}>Automatically send the rest</Button></div><p className="mt-2 text-xs text-gray-500">Automatic sending, when connected, processes up to 5 people each minute and stops at the allowance.</p>{!workerConfigured ? <p className="mt-2 text-xs text-amber-800">Automatic sending is not connected yet. Manual sends are available after the test.</p> : null}{quotaPaused && !quotaFull ? <p className="mt-2 text-xs text-amber-800">A slot has opened. Nothing resumes until you choose a send option.</p> : null}</div> : null}
         {showProblems && problems ? <div className="mt-4 rounded-xl bg-gray-50 p-4 text-xs dark:bg-zinc-800">
             <p className="font-bold">{problems.total} recipients need review (showing up to 30)</p>
             {problems.lastWorkerRunAt ? <p className="mt-1 text-gray-500">Worker last ran {new Date(problems.lastWorkerRunAt).toLocaleString()}</p> : <p className="mt-1 text-gray-500">Worker has not run yet.</p>}
@@ -162,6 +213,7 @@ export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerC
     const [mapping, setMapping] = useState<Record<string, string>>({})
     const [ready, setReady] = useState<number | null>(null)
     const [sample, setSample] = useState<AudiencePreviewRow | null>(null)
+    const [quota, setQuota] = useState<WhatsAppQuotaStatus | null>(null)
     const [requestKey, setRequestKey] = useState(() => crypto.randomUUID())
     const selectedAudience = audiences.find((item) => item.id === audienceId)
     const selectedTemplate = templates.find((item) => item.id === templateId && item.status === "approved")
@@ -212,6 +264,15 @@ export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerC
         const timer = window.setInterval(() => router.refresh(), 15_000)
         return () => window.clearInterval(timer)
     }, [campaigns, mode, router])
+
+    useEffect(() => {
+        if (mode !== "campaign") return
+        let active = true
+        const refresh = () => void getWhatsAppSendAllowance().then((value) => { if (active) setQuota(value) }).catch(() => { if (active) setQuota(null) })
+        refresh()
+        const timer = window.setInterval(refresh, 15_000)
+        return () => { active = false; window.clearInterval(timer) }
+    }, [mode])
 
     function changeFilters(update: Partial<AudienceFilters>) {
         setPage(0)
@@ -337,6 +398,6 @@ export function SecureCsvCampaignWorkspace({ campaigns, mode, templates, workerC
                 <Button className="h-12 w-full bg-[#25D366] font-bold text-white hover:bg-[#20bd5a]" disabled={isPending || !campaignName.trim() || !selectedAudience || !selectedTemplate || !ready} onClick={queue}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Prepare {ready ?? 0} people — do not send yet</Button>
             </div>
         </section>
-        <section className="rounded-[2rem] border bg-white p-6 dark:bg-zinc-900"><h2 className="text-xl font-black">Campaign progress</h2><p className="mt-1 text-sm text-gray-500">See who is waiting and exactly why a send failed or was skipped. Progress refreshes every 15 seconds.</p><div className="mt-5 space-y-3">{campaigns.length ? campaigns.map((campaign) => <CampaignProgressCard key={campaign.id} campaign={campaign} workerConfigured={workerConfigured} />) : <p className="py-8 text-sm text-gray-500">No campaigns yet.</p>}</div></section>
+        <section className="rounded-[2rem] border bg-white p-6 dark:bg-zinc-900"><h2 className="text-xl font-black">Campaign progress</h2><p className="mt-1 text-sm text-gray-500">See who is waiting and exactly why a send failed or was skipped. Progress refreshes every 15 seconds.</p><div className="mt-5 space-y-3">{campaigns.length ? campaigns.map((campaign) => <CampaignProgressCard key={campaign.id} campaign={campaign} quota={quota} workerConfigured={workerConfigured} />) : <p className="py-8 text-sm text-gray-500">No campaigns yet.</p>}</div></section>
     </div>
 }

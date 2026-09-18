@@ -1,8 +1,8 @@
 # WhatsApp campaign worker
 
-New CSV campaigns are manual-only. Preparing a campaign never sends a message. An authorized admin can press **Send next 5 as test**; this uses the same server-side worker as automatic sending and requires confirmation each time.
+New CSV campaigns are manual-only. Preparing a campaign never sends a message. An authorized admin first presses **Send first 5 as test**; this sends real messages to at most five recipients and requires confirmation. The follow-up choices unlock after Meta accepts at least one test message. The admin can then choose a number to process next (up to 250, sent in server-side batches of five), enable automatic batches if the scheduler is configured, or cancel all unsent recipients. A browser-initiated manual run stops if the page closes; already completed batches stay recorded.
 
-Automatic batches are scheduled once per minute by Supabase Cron. The scheduled SQL function is a no-op until its two Vault secrets exist. Each run claims at most five recipients. Recipients are checked again for valid phone, required template values, active contact permission and RSS's rolling 250-recipient safety cap before Meta is called. When the cap is full, unsent recipients stay queued. A send with an unknown outcome is not retried automatically.
+Automatic batches are scheduled once per minute by Supabase Cron. The scheduled SQL function is a no-op until its two Vault secrets exist. Each run claims at most five recipients. Recipients are checked again for valid phone, required template values, active contact permission and RSS's rolling 250-recipient safety cap before Meta is called. When the cap is full, automatic sending switches off, unsent recipients stay queued, and an admin must explicitly continue after a slot opens. A send with an unknown outcome is not retried automatically.
 
 To arm automatic sending, an operator with deployment access must:
 
