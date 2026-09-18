@@ -115,38 +115,33 @@ function StatusBadge({ status }: { status: string }) {
 function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
-    const [accessLevel, setAccessLevel] = useState(member.accessLevel)
+    const [home, setHome] = useState(member.canViewHome)
+    const [chat, setChat] = useState(member.canSendMessages)
     const [templates, setTemplates] = useState(member.canManageTemplates)
+    const [health, setHealth] = useState(member.canViewHealth)
+    const [builder, setBuilder] = useState(member.canUseBuilder)
     const [campaigns, setCampaigns] = useState(member.canSendCampaigns)
-    const isOwner = member.accessLevel === "owner"
 
     return (
-        <div className="grid gap-4 border-b border-gray-100 py-5 last:border-0 dark:border-zinc-800 lg:grid-cols-[1fr_170px_1.4fr_auto] lg:items-center">
+        <div className="grid gap-4 border-b border-gray-100 py-5 last:border-0 dark:border-zinc-800 lg:grid-cols-[1fr_2fr_auto] lg:items-center">
             <div>
                 <p className="font-bold text-gray-900 dark:text-white">{member.fullName}</p>
                 <p className="text-xs capitalize text-gray-500">{member.role.replace("_", " ")}</p>
             </div>
-            <select
-                value={accessLevel}
-                disabled={isOwner || isPending}
-                onChange={(event) => setAccessLevel(event.target.value as typeof accessLevel)}
-                className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm dark:border-zinc-700 dark:bg-zinc-800"
-            >
-                {isOwner ? <option value="owner">Owner</option> : null}
-                <option value="none">No access</option>
-                <option value="operator">Operator</option>
-                <option value="manager">Manager</option>
-            </select>
             <div className="flex flex-wrap gap-3 text-xs">
                 {[
+                    { checked: home, label: "Home", setChecked: setHome },
+                    { checked: chat, label: "Chat with customers", setChecked: setChat },
                     { checked: templates, label: "Templates", setChecked: setTemplates },
+                    { checked: health, label: "Account health", setChecked: setHealth },
+                    { checked: builder, label: "CSV Builder", setChecked: setBuilder },
                     { checked: campaigns, label: "Campaigns", setChecked: setCampaigns },
                 ].map((permission) => (
                     <label key={permission.label} className="flex items-center gap-2 rounded-full border border-gray-200 px-3 py-2 dark:border-zinc-700">
                         <input
                             type="checkbox"
                             checked={permission.checked}
-                            disabled={isOwner || accessLevel === "none" || accessLevel === "manager" || isPending}
+                            disabled={isPending}
                             onChange={(event) => permission.setChecked(event.target.checked)}
                         />
                         {permission.label}
@@ -156,12 +151,14 @@ function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
             <Button
                 type="button"
                 variant="outline"
-                disabled={isOwner || isPending}
+                disabled={isPending}
                 onClick={() => runAction(
                     () => saveWhatsAppAccess({
-                        accessLevel: accessLevel === "owner" ? "none" : accessLevel,
-                        canManageContacts: member.canManageContacts,
+                        canViewHome: home,
+                        canSendMessages: chat,
                         canManageTemplates: templates,
+                        canViewHealth: health,
+                        canUseBuilder: builder,
                         canSendCampaigns: campaigns,
                         userId: member.userId,
                     }),
@@ -180,7 +177,7 @@ function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
 export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCenterPageData }) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
-    const [activeTab, setActiveTab] = useState<TabKey>(initialData.connection ? "home" : "settings")
+    const [activeTab, setActiveTab] = useState<TabKey>(initialData.access.canManageSettings && !initialData.connection ? "settings" : "home")
     const [connectionForm, setConnectionForm] = useState({
         accountLabel: initialData.connection?.accountLabel ?? "RSS Foods WhatsApp",
         apiToken: "",
@@ -193,10 +190,14 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
     const [testPhone, setTestPhone] = useState("")
     const visibleTabs = tabs.filter((tab) => {
         if (tab.key === "settings") return initialData.access.canManageSettings
+        if (tab.key === "home") return initialData.access.canViewHome
+        if (tab.key === "send") return initialData.access.canSendMessages
         if (tab.key === "templates") return initialData.access.canManageTemplates
-        if (tab.key === "campaigns" || tab.key === "builder") return initialData.access.canSendCampaigns
-        return true
+        if (tab.key === "health") return initialData.access.canViewHealth
+        if (tab.key === "builder") return initialData.access.canUseBuilder
+        return initialData.access.canSendCampaigns
     })
+    const shownTab = visibleTabs.some((tab) => tab.key === activeTab) ? activeTab : visibleTabs[0]?.key
 
     return (
         <div className="space-y-6">
@@ -217,7 +218,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                         </p>
                     </div>
                     <div className="flex flex-wrap items-start gap-3">
-                    <WhatsAppQuotaBanner />
+                    {initialData.access.canUseBuilder || initialData.access.canSendCampaigns ? <WhatsAppQuotaBanner /> : null}
                     <div className="flex items-center gap-3 rounded-2xl bg-black/15 px-4 py-3 backdrop-blur">
                         <span className={cn("h-3 w-3 rounded-full", initialData.connection?.isActive ? "bg-lime-300" : "bg-amber-300")} />
                         <div>
@@ -237,7 +238,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                         onClick={() => setActiveTab(tab.key)}
                         className={cn(
                             "flex shrink-0 items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition",
-                            activeTab === tab.key
+                            shownTab === tab.key
                                 ? "bg-[#128C7E] text-white shadow-sm"
                                 : "text-gray-500 hover:bg-gray-50 hover:text-gray-900 dark:hover:bg-zinc-800 dark:hover:text-white"
                         )}
@@ -248,14 +249,16 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 ))}
             </div>
 
-            {!initialData.connection ? (
+            {!visibleTabs.length ? <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">You have access to WhatsApp Center, but no tabs have been assigned yet. Ask the Supa Admin to choose your tabs in Team & settings.</div> : null}
+
+            {!initialData.connection && initialData.access.canManageSettings ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
                     <p className="font-bold">One quick setup remains</p>
                     <p className="mt-1 text-sm">Enter the WhatChimp API token and phone-number ID in Team & settings. Secrets will be encrypted before storage.</p>
                 </div>
             ) : null}
 
-            {activeTab === "home" ? (
+            {shownTab === "home" ? (
                 <div className="space-y-6">
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <StatCard icon={Sparkles} label="Approved templates" value={initialData.stats.approvedTemplates} help="Available for campaigns" />
@@ -281,7 +284,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                         <SectionCard>
                             <div className="flex items-center justify-between gap-4">
                                 <div><h2 className="text-xl font-black">Recent activity</h2><p className="mt-1 text-sm text-gray-500">Latest outgoing message results</p></div>
-                                <Button variant="outline" onClick={() => setActiveTab("send")}>Open customer chats</Button>
+                                {initialData.access.canSendMessages ? <Button variant="outline" onClick={() => setActiveTab("send")}>Open customer chats</Button> : null}
                             </div>
                             <div className="mt-5 divide-y divide-gray-100 dark:divide-zinc-800">
                                 {initialData.messages.length ? initialData.messages.slice(0, 6).map((message) => (
@@ -296,21 +299,34 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                 </div>
             ) : null}
 
-            {activeTab === "send" ? <ChatWorkspace data={initialData} /> : null}
+            {shownTab === "send" ? <ChatWorkspace data={initialData} /> : null}
 
-            {activeTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
+            {shownTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
 
-            {activeTab === "health" ? <AccountHealthWorkspace /> : null}
+            {shownTab === "health" ? <AccountHealthWorkspace /> : null}
 
-            {activeTab === "builder" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
+            {shownTab === "builder" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
 
-            {activeTab === "campaigns" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="campaign" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
+            {shownTab === "campaigns" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="campaign" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
 
-            {activeTab === "settings" && initialData.access.canManageSettings ? (
+            {shownTab === "settings" && initialData.access.canManageSettings ? (
                 <div className="space-y-6">
                     {initialData.connection?.webhookUrl ? <SectionCard><p className="font-black text-emerald-950 dark:text-emerald-100">Receive customer replies in RSS</p><p className="mt-1 text-sm text-gray-500">Paste this URL into WhatChimp’s “Trigger Webhook for Incoming Message” setting. Click the box to select the complete URL.</p><Input className="mt-4" readOnly value={initialData.connection.webhookUrl} onFocus={(event) => event.currentTarget.select()} /></SectionCard> : null}
                     <SectionCard><div className="flex items-start gap-4"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-[#128C7E]"><KeyRound className="h-5 w-5" /></div><div><h2 className="text-2xl font-black">Connection settings</h2><p className="mt-1 text-sm text-gray-500">Only the Supa Admin can see this section. Saved tokens are encrypted and are never displayed again.</p></div></div><div className="mt-6 grid gap-4 md:grid-cols-2"><label className="space-y-2"><span className="text-sm font-bold">Account label</span><Input value={connectionForm.accountLabel} onChange={(event) => setConnectionForm((current) => ({ ...current, accountLabel: event.target.value }))} /></label><label className="space-y-2"><span className="text-sm font-bold">Phone number ID</span><Input value={connectionForm.phoneNumberId} onChange={(event) => setConnectionForm((current) => ({ ...current, phoneNumberId: event.target.value }))} /></label><label className="space-y-2"><span className="text-sm font-bold">WhatChimp API token</span><Input type="password" autoComplete="new-password" value={connectionForm.apiToken} onChange={(event) => setConnectionForm((current) => ({ ...current, apiToken: event.target.value }))} placeholder={initialData.connection?.hasApiToken ? "Saved securely — leave blank to keep" : "Paste token"} /></label><label className="space-y-2"><span className="text-sm font-bold">Meta WABA ID</span><Input value={connectionForm.wabaId} onChange={(event) => setConnectionForm((current) => ({ ...current, wabaId: event.target.value }))} placeholder="Needed for template submission" /></label><label className="space-y-2"><span className="text-sm font-bold">Meta access token</span><Input type="password" autoComplete="new-password" value={connectionForm.metaAccessToken} onChange={(event) => setConnectionForm((current) => ({ ...current, metaAccessToken: event.target.value }))} placeholder={initialData.connection?.hasMetaToken ? "Saved securely — leave blank to keep" : "Needed for templates and campaigns"} /></label><label className="space-y-2"><span className="text-sm font-bold">Graph API version</span><Input value={connectionForm.graphApiVersion} onChange={(event) => setConnectionForm((current) => ({ ...current, graphApiVersion: event.target.value }))} /></label><label className="flex items-center gap-3"><input type="checkbox" checked={connectionForm.isActive} onChange={(event) => setConnectionForm((current) => ({ ...current, isActive: event.target.checked }))} /><span className="text-sm font-bold">Connection active</span></label></div><div className="mt-6 flex flex-wrap gap-3"><Button disabled={isPending} className="bg-[#128C7E]" onClick={() => runAction(() => saveWhatsAppConnection(connectionForm), "Connection saved securely.", router, startTransition)}><ShieldCheck className="mr-2 h-4 w-4" />Save connection</Button><Input className="max-w-xs" value={testPhone} onChange={(event) => setTestPhone(event.target.value)} placeholder="Test phone with country code" /><Button variant="outline" disabled={isPending || !initialData.connection} onClick={() => runAction(() => testSavedWhatsAppConnection(testPhone), "WhatChimp connection verified.", router, startTransition)}><RefreshCw className="mr-2 h-4 w-4" />Test safely</Button></div>{initialData.connection?.lastTestStatus ? <div className="mt-4 flex items-center gap-3 text-sm"><StatusBadge status={initialData.connection.lastTestStatus} /><span className="text-gray-500">{initialData.connection.lastTestMessage}</span></div> : null}</SectionCard>
-                    <SectionCard><div className="flex items-start gap-4"><div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600"><Users className="h-5 w-5" /></div><div><h2 className="text-2xl font-black">Who can use WhatsApp Center?</h2><p className="mt-1 text-sm text-gray-500">Supa Admin controls access. Managers receive all working permissions; operators can be limited.</p></div></div><div className="mt-5">{initialData.team.map((member) => <TeamAccessRow key={member.userId} member={member} />)}</div></SectionCard>
+                    <SectionCard>
+                        <div className="flex items-start gap-4">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-50 text-violet-600"><Users className="h-5 w-5" /></div>
+                            <div>
+                                <h2 className="text-2xl font-black">Choose who can use each tab</h2>
+                                <p className="mt-1 text-sm text-gray-500">Only people granted WhatsApp Center access on the Admin page appear here. Each tab can be turned on or off separately. Only the Supa Admin can change these settings.</p>
+                            </div>
+                        </div>
+                        <div className="mt-5">
+                            {initialData.team.filter((member) => member.accessLevel !== "owner").length
+                                ? initialData.team.filter((member) => member.accessLevel !== "owner").map((member) => <TeamAccessRow key={member.userId} member={member} />)
+                                : <p className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500 dark:bg-zinc-800">No one has been granted page access yet. Add an Admin or Sub Admin from the Admin page first.</p>}
+                        </div>
+                    </SectionCard>
                 </div>
             ) : null}
         </div>

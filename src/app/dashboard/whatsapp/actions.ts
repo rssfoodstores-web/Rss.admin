@@ -106,10 +106,13 @@ export interface WhatsAppConversationAssignment {
 }
 
 export interface WhatsAppTeamRecord {
-    accessLevel: "manager" | "none" | "operator" | "owner"
-    canManageContacts: boolean
+    accessLevel: "manager" | "operator" | "owner"
     canManageTemplates: boolean
     canSendCampaigns: boolean
+    canSendMessages: boolean
+    canUseBuilder: boolean
+    canViewHealth: boolean
+    canViewHome: boolean
     fullName: string
     role: "admin" | "sub_admin" | "supa_admin"
     userId: string
@@ -135,12 +138,14 @@ export interface WhatsAppCenterPageData {
 }
 
 export async function getWhatsAppSendAllowance(): Promise<WhatsAppQuotaStatus> {
-    await getWhatsAppContext()
+    const context = await getWhatsAppContext()
+    if (!context.whatsappAccess.canUseBuilder && !context.whatsappAccess.canSendCampaigns) throw new Error("No audience or campaign access.")
     return getWhatsAppQuotaStatus()
 }
 
 export async function getWhatsAppHealth(): Promise<WhatsAppHealthSnapshot> {
     const context = await getWhatsAppContext()
+    if (!context.whatsappAccess.canViewHealth) throw new Error("Account Health access has not been granted.")
     const connection = await loadWhatsAppConnection(context.adminSupabase)
     const campaignWorkerConfigured = await isCampaignSchedulerReady(context.adminSupabase)
     const { data: rows, error } = await context.adminSupabase
@@ -177,6 +182,10 @@ interface GrantRow {
     can_manage_contacts: boolean
     can_manage_templates: boolean
     can_send_campaigns: boolean
+    can_use_builder: boolean
+    can_use_chat: boolean
+    can_view_health: boolean
+    can_view_home: boolean
 }
 
 function toStringArray(value: unknown) {
@@ -225,13 +234,16 @@ async function getWhatsAppContext() {
                 canManageTemplates: true,
                 canSendCampaigns: true,
                 canSendMessages: true,
+                canUseBuilder: true,
+                canViewHealth: true,
+                canViewHome: true,
             } satisfies WhatsAppAccess,
         }
     }
 
     const { data: grant } = await adminSupabase
         .from("whatsapp_access_grants")
-        .select("access_level, can_manage_contacts, can_manage_templates, can_send_campaigns")
+        .select("access_level, can_manage_contacts, can_manage_templates, can_send_campaigns, can_use_builder, can_use_chat, can_view_health, can_view_home")
         .eq("user_id", access.user.id)
         .maybeSingle()
 
@@ -249,7 +261,10 @@ async function getWhatsAppContext() {
             canManageSettings: false,
             canManageTemplates: row.can_manage_templates,
             canSendCampaigns: row.can_send_campaigns,
-            canSendMessages: true,
+            canSendMessages: row.can_use_chat,
+            canUseBuilder: row.can_use_builder,
+            canViewHealth: row.can_view_health,
+            canViewHome: row.can_view_home,
         } satisfies WhatsAppAccess,
     }
 }
@@ -257,8 +272,11 @@ async function getWhatsAppContext() {
 async function requireCapability(capability: WhatsAppCapability) {
     const context = await getWhatsAppContext()
     const allowed = {
+        builder: context.whatsappAccess.canUseBuilder,
         campaigns: context.whatsappAccess.canSendCampaigns,
         contacts: context.whatsappAccess.canManageContacts,
+        health: context.whatsappAccess.canViewHealth,
+        home: context.whatsappAccess.canViewHome,
         messages: context.whatsappAccess.canSendMessages,
         settings: context.whatsappAccess.canManageSettings,
         templates: context.whatsappAccess.canManageTemplates,
@@ -377,19 +395,22 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
         const [{ data: roleRows }, { data: profileRows }, { data: grantRows }] = await Promise.all([
             admin.from("user_roles").select("user_id, role").in("role", ["admin", "sub_admin", "supa_admin"]),
             admin.from("profiles").select("id, full_name"),
-            admin.from("whatsapp_access_grants").select("user_id, access_level, can_manage_contacts, can_manage_templates, can_send_campaigns"),
+            admin.from("whatsapp_access_grants").select("user_id, access_level, can_manage_templates, can_send_campaigns, can_use_builder, can_use_chat, can_view_health, can_view_home"),
         ])
         const profileMap = new Map((profileRows ?? []).map((profile) => [profile.id, profile.full_name]))
         const grantMap = new Map((grantRows ?? []).map((grant) => [grant.user_id, grant as GrantRow & { user_id: string }]))
 
-        team = (roleRows ?? []).map((roleRow) => {
+        team = (roleRows ?? []).filter((roleRow) => roleRow.role === "supa_admin" || grantMap.has(roleRow.user_id)).map((roleRow) => {
             const grant = grantMap.get(roleRow.user_id)
             const isOwner = roleRow.role === "supa_admin"
             return {
-                accessLevel: (isOwner ? "owner" : grant?.access_level ?? "none") as WhatsAppTeamRecord["accessLevel"],
-                canManageContacts: isOwner || Boolean(grant?.can_manage_contacts),
+                accessLevel: (isOwner ? "owner" : grant?.access_level ?? "operator") as WhatsAppTeamRecord["accessLevel"],
                 canManageTemplates: isOwner || Boolean(grant?.can_manage_templates),
                 canSendCampaigns: isOwner || Boolean(grant?.can_send_campaigns),
+                canSendMessages: isOwner || Boolean(grant?.can_use_chat),
+                canUseBuilder: isOwner || Boolean(grant?.can_use_builder),
+                canViewHealth: isOwner || Boolean(grant?.can_view_health),
+                canViewHome: isOwner || Boolean(grant?.can_view_home),
                 fullName: profileMap.get(roleRow.user_id) ?? "Unnamed administrator",
                 role: roleRow.role as WhatsAppTeamRecord["role"],
                 userId: roleRow.user_id,
@@ -410,7 +431,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
     return {
         access: context.whatsappAccess,
         campaignWorkerConfigured,
-        campaigns,
+        campaigns: context.whatsappAccess.canSendCampaigns ? campaigns : [],
         connection: connectionRow ? {
             accountLabel: connectionRow.account_label,
             graphApiVersion: connectionRow.graph_api_version,
@@ -420,23 +441,23 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
             lastTestMessage: connectionRow.last_test_message ?? null,
             lastTestStatus: connectionRow.last_test_status as WhatsAppConnectionSummary["lastTestStatus"],
             lastTestedAt: connectionRow.last_tested_at ?? null,
-            phoneNumberId: connectionRow.phone_number_id,
-            wabaId: connectionRow.waba_id ?? "",
-            webhookSecret: connectionRow.webhook_secret,
-            webhookUrl: `${process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")}/api/webhooks/whatchimp?key=${connectionRow.webhook_secret}`,
+            phoneNumberId: context.whatsappAccess.canManageSettings ? connectionRow.phone_number_id : "",
+            wabaId: context.whatsappAccess.canManageSettings ? connectionRow.waba_id ?? "" : "",
+            webhookSecret: context.whatsappAccess.canManageSettings ? connectionRow.webhook_secret : "",
+            webhookUrl: context.whatsappAccess.canManageSettings ? `${process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")}/api/webhooks/whatchimp?key=${connectionRow.webhook_secret}` : "",
         } : null,
-        contacts,
-        conversationAssignments,
+        contacts: context.whatsappAccess.canSendMessages ? contacts : [],
+        conversationAssignments: context.whatsappAccess.canSendMessages ? conversationAssignments : [],
         currentUserId: context.access.user.id,
-        messages,
+        messages: context.whatsappAccess.canSendMessages || context.whatsappAccess.canViewHome ? messages : [],
         stats: {
-            activeContacts: contacts.filter((contact) => contact.isActive).length,
-            approvedTemplates: templates.filter((template) => template.status === "approved").length,
-            deliveredMessages: messages.filter((message) => message.status === "delivered" || message.status === "read").length,
-            failedMessages: messages.filter((message) => message.status === "failed").length,
+            activeContacts: context.whatsappAccess.canViewHome ? contacts.filter((contact) => contact.isActive).length : 0,
+            approvedTemplates: context.whatsappAccess.canViewHome ? templates.filter((template) => template.status === "approved").length : 0,
+            deliveredMessages: context.whatsappAccess.canViewHome ? messages.filter((message) => message.status === "delivered" || message.status === "read").length : 0,
+            failedMessages: context.whatsappAccess.canViewHome ? messages.filter((message) => message.status === "failed").length : 0,
         },
-        team,
-        templates,
+        team: context.whatsappAccess.canManageSettings || context.whatsappAccess.canSendMessages ? team : [],
+        templates: context.whatsappAccess.canManageTemplates || context.whatsappAccess.canSendMessages || context.whatsappAccess.canSendCampaigns ? templates : [],
     }
 }
 
@@ -532,49 +553,35 @@ export async function testSavedWhatsAppConnection(testPhone: string): Promise<Ac
 }
 
 export async function saveWhatsAppAccess(input: {
-    accessLevel: "manager" | "none" | "operator"
-    canManageContacts: boolean
     canManageTemplates: boolean
     canSendCampaigns: boolean
+    canSendMessages: boolean
+    canUseBuilder: boolean
+    canViewHealth: boolean
+    canViewHome: boolean
     userId: string
 }): Promise<ActionResult> {
     try {
         const context = await requireCapability("settings")
-        const { data: roles } = await context.adminSupabase
-            .from("user_roles")
-            .select("role")
-            .eq("user_id", input.userId)
-            .in("role", ["admin", "sub_admin", "supa_admin"])
-
-        if ((roles ?? []).some((row) => row.role === "supa_admin")) {
-            return { error: "Supa Admin access is permanent and cannot be changed." }
-        }
-        if (!roles?.length) {
-            return { error: "Only an admin or sub-admin can receive WhatsApp Center access." }
-        }
-
-        if (input.accessLevel === "none") {
-            const { error } = await context.adminSupabase.from("whatsapp_access_grants").delete().eq("user_id", input.userId)
-            if (error) return { error: error.message }
-        } else {
-            const manager = input.accessLevel === "manager"
-            const { error } = await context.adminSupabase.from("whatsapp_access_grants").upsert({
-                access_level: input.accessLevel,
-                can_manage_contacts: manager || input.canManageContacts,
-                can_manage_templates: manager || input.canManageTemplates,
-                can_send_campaigns: manager || input.canSendCampaigns,
-                granted_by: context.access.user.id,
+        const { data: grant, error } = await context.adminSupabase.from("whatsapp_access_grants")
+            .update({
+                can_manage_templates: input.canManageTemplates === true,
+                can_send_campaigns: input.canSendCampaigns === true,
+                can_use_chat: input.canSendMessages === true,
+                can_use_builder: input.canUseBuilder === true,
+                can_view_health: input.canViewHealth === true,
+                can_view_home: input.canViewHome === true,
                 updated_at: new Date().toISOString(),
-                user_id: input.userId,
-            }, { onConflict: "user_id" })
-            if (error) return { error: error.message }
-        }
+            }).eq("user_id", input.userId).select("user_id").maybeSingle()
+        if (error || !grant) return { error: "This person does not have WhatsApp Center page access. Grant it on Admin Management first." }
 
         await writeAudit(context, "update_whatsapp_access", "whatsapp_access", input.userId, {
-            access_level: input.accessLevel,
-            can_manage_contacts: input.canManageContacts,
             can_manage_templates: input.canManageTemplates,
             can_send_campaigns: input.canSendCampaigns,
+            can_use_chat: input.canSendMessages,
+            can_use_builder: input.canUseBuilder,
+            can_view_health: input.canViewHealth,
+            can_view_home: input.canViewHome,
         })
         refreshWhatsAppCenter()
         return { success: true }
@@ -854,6 +861,17 @@ export async function assignWhatsAppConversation(input: {
 }): Promise<ActionResult> {
     try {
         const context = await requireCapability("messages")
+        if (input.assigneeId) {
+            const { data: roles, error: roleError } = await context.adminSupabase.from("user_roles")
+                .select("role").eq("user_id", input.assigneeId).in("role", ["admin", "sub_admin", "supa_admin"])
+            if (roleError) return { error: "Could not verify the selected teammate." }
+            const isOwner = (roles ?? []).some((row) => row.role === "supa_admin")
+            if (!isOwner) {
+                const { data: grant, error: grantError } = await context.adminSupabase.from("whatsapp_access_grants")
+                    .select("can_use_chat").eq("user_id", input.assigneeId).maybeSingle()
+                if (grantError || !grant?.can_use_chat || !(roles ?? []).length) return { error: "Choose a teammate who has Chat access." }
+            }
+        }
         const { error } = await context.adminSupabase.from("whatsapp_conversation_assignments").upsert({
             assigned_at: input.assigneeId ? new Date().toISOString() : null,
             assigned_to: input.assigneeId,

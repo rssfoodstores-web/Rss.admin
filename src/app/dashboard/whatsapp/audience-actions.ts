@@ -46,16 +46,23 @@ function cleanFilters(input: AudienceFilters): AudienceFilters {
     }
 }
 
-async function campaignAccess() {
+async function audienceAccess(capability: "builder" | "campaigns" | "either") {
     const access = await requireAdminRouteAccess("whatsapp_center")
     const admin = createAdminClient()
     if (access.primaryRole !== "supa_admin") {
         const { data: grant, error } = await admin.from("whatsapp_access_grants")
-            .select("can_send_campaigns").eq("user_id", access.user.id).maybeSingle()
-        if (error || !grant?.can_send_campaigns) throw new Error("You do not have permission to manage campaigns.")
+            .select("can_send_campaigns,can_use_builder").eq("user_id", access.user.id).maybeSingle()
+        const allowed = capability === "builder" ? grant?.can_use_builder
+            : capability === "campaigns" ? grant?.can_send_campaigns
+            : grant?.can_use_builder || grant?.can_send_campaigns
+        if (error || !allowed) throw new Error("You do not have permission for this WhatsApp tab.")
     }
     return { admin, actor: access.user.id }
 }
+
+const campaignAccess = () => audienceAccess("campaigns")
+const builderAccess = () => audienceAccess("builder")
+const audienceListAccess = () => audienceAccess("either")
 
 function summary(row: Record<string, unknown>): AudienceSummary {
     return {
@@ -71,7 +78,7 @@ function summary(row: Record<string, unknown>): AudienceSummary {
 
 export async function previewDatabaseAudience(input: AudienceFilters, page = 0) {
     try {
-        const { admin } = await campaignAccess()
+        const { admin } = await builderAccess()
         const filters = cleanFilters(input)
         const safePage = Math.max(0, Math.min(100000, Math.floor(Number(page) || 0)))
         const { data, error } = await admin.rpc("whatsapp_audience_rows", { p_filters: filters })
@@ -96,7 +103,7 @@ export async function previewDatabaseAudience(input: AudienceFilters, page = 0) 
 
 export async function saveDatabaseAudience(input: { name: string; filters: AudienceFilters; columns: string[] }) {
     try {
-        const { admin, actor } = await campaignAccess()
+        const { admin, actor } = await builderAccess()
         const columns = Array.from(new Set(input.columns.filter((column) => allowedColumns.has(column))))
         if (!input.name?.trim() || !columns.length) return { error: "Name the audience and select at least one column." }
         const { data: id, error } = await admin.rpc("whatsapp_save_database_audience", {
@@ -114,7 +121,7 @@ export async function saveDatabaseAudience(input: { name: string; filters: Audie
 
 export async function listSavedAudiences() {
     try {
-        const { admin } = await campaignAccess()
+        const { admin } = await audienceListAccess()
         const { data, error } = await admin.from("whatsapp_audiences")
             .select("id,name,source,columns,row_count,consent_count,created_at")
             .order("created_at", { ascending: false }).limit(100)
@@ -126,7 +133,7 @@ export async function listSavedAudiences() {
 
 export async function previewSavedAudience(audienceId: string, page = 0) {
     try {
-        const { admin } = await campaignAccess()
+        const { admin } = await audienceListAccess()
         const safePage = Math.max(0, Math.floor(Number(page) || 0))
         const { data, error, count } = await admin.from("whatsapp_audience_recipients")
             .select("id,phone,consent,fields", { count: "exact" })

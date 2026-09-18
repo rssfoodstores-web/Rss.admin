@@ -39,9 +39,9 @@ export async function POST(request: NextRequest) {
         const access = await requireAdminRouteAccess("whatsapp_center")
         const admin = createAdminClient()
         if (access.primaryRole !== "supa_admin") {
-            const grant = await admin.from("whatsapp_access_grants").select("can_send_campaigns")
+            const grant = await admin.from("whatsapp_access_grants").select("can_use_builder")
                 .eq("user_id", access.user.id).maybeSingle()
-            if (!grant.data?.can_send_campaigns) return NextResponse.json({ error: "No campaign access." }, { status: 403 })
+            if (!grant.data?.can_use_builder) return NextResponse.json({ error: "No CSV Builder access." }, { status: 403 })
         }
         const form = await request.formData()
         const file = form.get("file")

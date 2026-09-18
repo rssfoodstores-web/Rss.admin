@@ -88,6 +88,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
     const [selectedUserId, setSelectedUserId] = useState<string>("")
     const [selectedRole, setSelectedRole] = useState<EditableRole>("sub_admin")
     const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
+    const [whatsappCenterAccess, setWhatsappCenterAccess] = useState(false)
 
     const users = useMemo(() => {
         const normalizedQuery = query.trim().toLowerCase()
@@ -117,6 +118,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
         setSelectedUserId("")
         setSelectedRole("sub_admin")
         setSelectedPermissions([])
+        setWhatsappCenterAccess(false)
         setQuery("")
         setIsDialogOpen(true)
     }
@@ -125,6 +127,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
         setSelectedUserId(admin.id)
         setSelectedRole(admin.role === "supa_admin" ? "admin" : admin.role)
         setSelectedPermissions(admin.role === "sub_admin" ? admin.permissionKeys : [])
+        setWhatsappCenterAccess(admin.whatsappCenterAccess)
         setQuery(admin.fullName)
         setIsDialogOpen(true)
     }
@@ -145,6 +148,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                 permissionKeys: selectedRole === "sub_admin" ? selectedPermissions : [],
                 role: selectedRole,
                 userId: selectedUserId,
+                whatsappCenterAccess: selectedRole !== "none" && whatsappCenterAccess,
             })
 
             if (result.error) {
@@ -175,7 +179,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Admin Management</h1>
                     <p className="text-muted-foreground">
-                        Promote users to full admin or sub-admin and control exactly which dashboard pages each sub-admin can use.
+                        Promote users to admin or sub-admin, choose dashboard access, and separately grant the WhatsApp Center page.
                     </p>
                 </div>
 
@@ -190,7 +194,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                         <DialogHeader>
                             <DialogTitle>Manage dashboard access</DialogTitle>
                             <DialogDescription>
-                                Choose a user, set their admin level, and assign page access when the role is sub-admin.
+                                Choose a user, set their admin level, and decide whether they can open WhatsApp Center. Its tabs are assigned separately by the Supa Admin.
                             </DialogDescription>
                         </DialogHeader>
 
@@ -222,6 +226,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                                                     onClick={() => {
                                                         setSelectedUserId(user.id)
                                                         setQuery(user.fullName)
+                                                        setWhatsappCenterAccess(initialData.admins.find((admin) => admin.id === user.id)?.whatsappCenterAccess ?? false)
                                                     }}
                                                     className={`flex w-full items-start gap-3 p-4 text-left transition ${isSelected ? "bg-orange-50 dark:bg-orange-950/20" : "hover:bg-muted/50"}`}
                                                 >
@@ -265,6 +270,11 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                                         <p className="mt-3 text-sm text-muted-foreground">Pick a user from the list before saving access.</p>
                                     )}
                                 </div>
+
+                                <label className="flex items-start gap-3 rounded-2xl border border-orange-200 bg-orange-50 p-4 dark:border-orange-900 dark:bg-orange-950/20">
+                                    <Checkbox checked={selectedRole !== "none" && whatsappCenterAccess} disabled={selectedRole === "none"} onCheckedChange={(checked) => setWhatsappCenterAccess(checked === true)} />
+                                    <span><strong className="block text-sm">Allow WhatsApp Center page</strong><span className="mt-1 block text-xs text-muted-foreground">This only opens the page. The Supa Admin chooses its individual tabs in WhatsApp Center → Team & settings.</span></span>
+                                </label>
 
                                 <div className="rounded-2xl border p-4">
                                     <Label className="text-sm font-medium">Admin level</Label>
@@ -384,7 +394,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                 <CardHeader>
                     <CardTitle>Administrators</CardTitle>
                     <CardDescription>
-                        Super admins stay read-only here. Admins have full dashboard access. Sub-admins only see the pages assigned to them.
+                        Super admins stay read-only here. WhatsApp Center access is separate from other dashboard permissions.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -422,6 +432,9 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                                 </div>
 
                                 <div className="mt-4 flex flex-wrap items-center gap-2">
+                                    <Badge variant={admin.whatsappCenterAccess ? "secondary" : "outline"}>
+                                        {admin.whatsappCenterAccess ? "WhatsApp Center allowed" : "No WhatsApp Center access"}
+                                    </Badge>
                                     {admin.role === "sub_admin" ? (
                                         <>
                                             <Badge variant="secondary">
@@ -438,7 +451,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                                             ) : null}
                                         </>
                                     ) : (
-                                        <Badge variant="secondary">Full dashboard access</Badge>
+                                        <Badge variant="secondary">Other dashboard pages available</Badge>
                                     )}
                                 </div>
                             </div>

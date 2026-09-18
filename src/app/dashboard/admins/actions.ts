@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache"
 import { requireAdminRoleAccess } from "@/lib/admin-auth"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { type AdminRouteKey, getAssignableAdminRoutes, normalizeAssignablePermissionKeys } from "@/lib/admin-routes"
 
 interface AdminManagementResult {
@@ -26,6 +27,7 @@ export interface ManagedAdminRecord {
     fullName: string
     id: string
     permissionKeys: AdminRouteKey[]
+    whatsappCenterAccess: boolean
     phone: string | null
     role: "admin" | "sub_admin" | "supa_admin"
     updatedAt: string | null
@@ -46,6 +48,7 @@ interface SaveAdminAccessInput {
     permissionKeys: string[]
     role: "admin" | "sub_admin" | "none"
     userId: string
+    whatsappCenterAccess: boolean
 }
 
 function sortRoles(roleNames: string[]) {
@@ -82,7 +85,7 @@ export async function getAdminManagementPageData(): Promise<AdminManagementPageD
         title: permission.title,
     }))
 
-    const [{ data: adminRoleRows }, { data: profileRows }, { data: permissionRows }, { data: userRoleRows }] = await Promise.all([
+    const [{ data: adminRoleRows }, { data: profileRows }, { data: permissionRows }, { data: userRoleRows }, { data: whatsappGrants }] = await Promise.all([
         access.supabase
             .from("user_roles")
             .select("user_id, role, created_at")
@@ -98,7 +101,9 @@ export async function getAdminManagementPageData(): Promise<AdminManagementPageD
         access.supabase
             .from("user_roles")
             .select("user_id, role"),
+        createAdminClient().from("whatsapp_access_grants").select("user_id"),
     ])
+    const whatsappUserIds = new Set((whatsappGrants ?? []).map((row) => row.user_id))
 
     const profileMap = new Map(
         (profileRows ?? []).map((profile) => [
@@ -139,6 +144,7 @@ export async function getAdminManagementPageData(): Promise<AdminManagementPageD
                 ...profile,
                 createdAt: row.created_at ?? null,
                 permissionKeys: permissionMap.get(row.user_id) ?? [],
+                whatsappCenterAccess: row.role === "supa_admin" || whatsappUserIds.has(row.user_id),
                 role: row.role as ManagedAdminRecord["role"],
             }
         })
@@ -247,6 +253,22 @@ export async function saveAdminAccess(input: SaveAdminAccessInput): Promise<Admi
         }
     }
 
+    const whatsappAdmin = createAdminClient()
+    if (input.role !== "none" && input.whatsappCenterAccess === true) {
+        const { data: existingGrant, error: readGrantError } = await whatsappAdmin.from("whatsapp_access_grants")
+            .select("user_id").eq("user_id", userId).maybeSingle()
+        if (readGrantError) return { error: "Could not verify WhatsApp Center access." }
+        if (!existingGrant) {
+            const { error: grantError } = await whatsappAdmin.from("whatsapp_access_grants").insert({
+                user_id: userId, access_level: "operator", granted_by: access.user.id,
+            })
+            if (grantError) return { error: "Could not grant WhatsApp Center access." }
+        }
+    } else {
+        const { error: revokeError } = await whatsappAdmin.from("whatsapp_access_grants").delete().eq("user_id", userId)
+        if (revokeError) return { error: "Could not remove WhatsApp Center access." }
+    }
+
     await writeAuditLog(
         access,
         input.role === "none" ? "revoke_admin_access" : "update_admin_access",
@@ -254,6 +276,7 @@ export async function saveAdminAccess(input: SaveAdminAccessInput): Promise<Admi
         {
             assigned_role: input.role,
             permission_keys: input.role === "sub_admin" ? normalizedPermissionKeys : [],
+            whatsapp_center_access: input.role !== "none" && input.whatsappCenterAccess === true,
         }
     )
 
@@ -261,5 +284,6 @@ export async function saveAdminAccess(input: SaveAdminAccessInput): Promise<Admi
     revalidatePath("/dashboard/accounts")
     revalidatePath("/dashboard/account-info")
     revalidatePath("/dashboard")
+    revalidatePath("/dashboard/whatsapp")
     return { success: true }
 }

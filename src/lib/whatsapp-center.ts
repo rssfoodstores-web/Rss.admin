@@ -6,7 +6,7 @@ import { isValidE164PhoneNumber, normalizePhoneNumber } from "@/lib/phone"
 import { reserveWhatsAppRecipient } from "@/lib/whatsapp-quota"
 
 export type WhatsAppAccessLevel = "manager" | "operator"
-export type WhatsAppCapability = "contacts" | "settings" | "templates" | "campaigns" | "messages"
+export type WhatsAppCapability = "builder" | "campaigns" | "contacts" | "health" | "home" | "messages" | "settings" | "templates"
 
 export interface WhatsAppAccess {
     accessLevel: WhatsAppAccessLevel | "owner"
@@ -15,6 +15,9 @@ export interface WhatsAppAccess {
     canManageTemplates: boolean
     canSendCampaigns: boolean
     canSendMessages: boolean
+    canUseBuilder: boolean
+    canViewHealth: boolean
+    canViewHome: boolean
 }
 
 export interface WhatsAppTemplateVariable {
