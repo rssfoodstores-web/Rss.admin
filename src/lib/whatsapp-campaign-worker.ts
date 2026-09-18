@@ -59,7 +59,7 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
     for (const row of batch) {
         const { data: currentCampaign, error: statusError } = await admin.from("whatsapp_campaigns").select("status").eq("id", campaignId).single()
         if (statusError) throw new Error("Could not confirm the campaign is still active.")
-        const contact = contactByPhone.get(row.phone)
+        let contact = contactByPhone.get(row.phone)
         const values = variables.map((variable) => row.fields[mapping[variable.name]]?.trim() ?? "")
         const phone = normalizeWhatsAppPhone(row.phone)
         let result: Outcome = "queued"
@@ -94,6 +94,21 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
         }
 
         if (result === "sent") {
+            if (!contact && phone) {
+                const name = row.fields.customer_name?.trim() || phone
+                // A successful send is not, by itself, a consent record.
+                const created = await admin.from("whatsapp_contacts").upsert({
+                    full_name: name, phone, source: "import", opted_in: false, is_active: true,
+                    last_message_at: new Date().toISOString(),
+                }, { onConflict: "phone", ignoreDuplicates: true })
+                if (!created.error) {
+                    const lookedUp = await admin.from("whatsapp_contacts").select("id,phone,opted_in,is_active").eq("phone", phone).maybeSingle()
+                    if (!lookedUp.error && lookedUp.data) {
+                        contact = lookedUp.data
+                        contactByPhone.set(phone, contact)
+                    }
+                }
+            }
             const rendered = renderTemplate(template.body, Object.fromEntries(variables.map((variable, i) => [variable.name, values[i]])))
             const { error: logError } = await admin.from("whatsapp_messages").insert({
                 body: rendered, campaign_id: campaignId, contact_id: contact?.id ?? row.contact_id,
@@ -109,7 +124,7 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
         }
         if (result === "failed" || result === "uncertain") lastError = errorMessage
         const { error: updateError } = await admin.from("whatsapp_campaign_recipients")
-            .update({ status: result, error_message: errorMessage, external_message_id: externalId, updated_at: new Date().toISOString() })
+            .update({ status: result, contact_id: contact?.id ?? row.contact_id, error_message: errorMessage, external_message_id: externalId, updated_at: new Date().toISOString() })
             .eq("id", row.id).eq("status", "processing")
         if (updateError) throw new Error(updateError.message)
         if (result !== "queued") claimed += 1

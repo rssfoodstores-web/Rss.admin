@@ -12,6 +12,7 @@ import {
     listMetaTemplates,
     loadWhatsAppConnection,
     normalizeWhatsAppPhone,
+    readWhatChimpConversation,
     renderTemplate,
     sendMetaTemplateMessage,
     sendWhatChimpSessionMessage,
@@ -135,6 +136,14 @@ export interface WhatsAppCenterPageData {
     }
     team: WhatsAppTeamRecord[]
     templates: WhatsAppTemplateRecord[]
+}
+
+export interface WhatsAppChatSnapshot {
+    checkedAt: string
+    contacts: WhatsAppContactRecord[]
+    conversationAssignments: WhatsAppConversationAssignment[]
+    lastWebhookAt: string | null
+    messages: WhatsAppMessageRecord[]
 }
 
 export async function getWhatsAppSendAllowance(): Promise<WhatsAppQuotaStatus> {
@@ -461,6 +470,66 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
     }
 }
 
+export async function getWhatsAppChatSnapshot(): Promise<WhatsAppChatSnapshot> {
+    const context = await requireCapability("messages")
+    const admin = context.adminSupabase
+    const [contactsResult, messagesResult, assignmentsResult, webhookResult] = await Promise.all([
+        admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active")
+            .order("last_message_at", { ascending: false, nullsFirst: false }).order("updated_at", { ascending: false }).limit(250),
+        admin.from("whatsapp_messages").select("id, contact_id, body, direction, status, error_message, sent_by, created_at, whatsapp_contacts(full_name)")
+            .not("contact_id", "is", null).order("created_at", { ascending: false }).limit(1000),
+        admin.from("whatsapp_conversation_assignments").select("contact_id, assigned_to, status"),
+        admin.from("whatsapp_messages").select("created_at").eq("direction", "inbound")
+            .contains("metadata", { source: "incoming_webhook" })
+            .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ])
+    const firstError = [contactsResult.error, messagesResult.error, assignmentsResult.error, webhookResult.error].find(Boolean)
+    if (firstError) throw new Error(firstError.message)
+
+    const assigneeIds = Array.from(new Set((assignmentsResult.data ?? []).map((item) => item.assigned_to).filter((id): id is string => Boolean(id))))
+    const profilesResult = assigneeIds.length
+        ? await admin.from("profiles").select("id, full_name").in("id", assigneeIds)
+        : { data: [], error: null }
+    if (profilesResult.error) throw new Error(profilesResult.error.message)
+    const names = new Map((profilesResult.data ?? []).map((profile) => [profile.id, profile.full_name]))
+
+    return {
+        checkedAt: new Date().toISOString(),
+        contacts: (contactsResult.data ?? []).map((row) => ({
+            customFields: toStringRecord(row.custom_fields),
+            email: row.email ?? null,
+            fullName: row.full_name,
+            id: row.id,
+            isActive: row.is_active,
+            labels: toStringArray(row.labels),
+            optedIn: row.opted_in,
+            phone: row.phone,
+            source: row.source as WhatsAppContactRecord["source"],
+        })),
+        conversationAssignments: (assignmentsResult.data ?? []).map((row) => ({
+            assignedTo: row.assigned_to ?? null,
+            assignedToName: row.assigned_to ? names.get(row.assigned_to) ?? "Another administrator" : null,
+            contactId: row.contact_id,
+            status: row.status as WhatsAppConversationAssignment["status"],
+        })),
+        lastWebhookAt: webhookResult.data?.created_at ?? null,
+        messages: (messagesResult.data ?? []).map((row) => {
+            const related = Array.isArray(row.whatsapp_contacts) ? row.whatsapp_contacts[0] : row.whatsapp_contacts
+            return {
+                body: row.body,
+                contactId: row.contact_id,
+                contactName: related?.full_name ?? null,
+                createdAt: row.created_at,
+                direction: row.direction as WhatsAppMessageRecord["direction"],
+                errorMessage: row.error_message ?? null,
+                id: row.id,
+                sentBy: row.sent_by ?? null,
+                status: row.status as WhatsAppMessageRecord["status"],
+            }
+        }),
+    }
+}
+
 export async function saveWhatsAppConnection(input: {
     accountLabel: string
     apiToken: string
@@ -777,6 +846,73 @@ export async function syncWhatsAppTemplateStatuses(): Promise<ActionResult> {
     }
 }
 
+export async function syncWhatsAppConversation(contactId: string): Promise<ActionResult & { imported?: number }> {
+    try {
+        const context = await requireCapability("messages")
+        const admin = context.adminSupabase
+        const { data: contact, error: contactError } = await admin.from("whatsapp_contacts")
+            .select("id, phone, full_name").eq("id", contactId).single()
+        if (contactError || !contact) return { error: "Customer chat not found." }
+        const connection = await loadWhatsAppConnection(admin)
+        const history = await readWhatChimpConversation(connection, contact.phone)
+        let imported = 0
+        for (const row of history) {
+            if (row.sender.toLowerCase() !== "subscriber" || !row.message.trim()) continue
+            const externalId = row.externalId ?? (row.id ? `whatchimp:${row.id}` : null)
+            if (!externalId) continue
+            const timestamp = /(?:Z|[+-]\d\d:\d\d)$/.test(row.timestamp)
+                ? new Date(row.timestamp)
+                : new Date(`${row.timestamp.replace(" ", "T")}Z`)
+            if (Number.isNaN(timestamp.getTime())) continue
+            const { error } = await admin.from("whatsapp_messages").insert({
+                body: row.message,
+                contact_id: contact.id,
+                created_at: timestamp.toISOString(),
+                direction: "inbound",
+                external_message_id: externalId,
+                message_type: "session",
+                metadata: { source: "whatchimp_history" },
+                status: "received",
+            })
+            if (error?.code === "23505") continue
+            if (error) return { error: "Could not save the recovered reply." }
+            imported += 1
+        }
+        if (imported) {
+            await admin.from("whatsapp_contacts").update({ last_message_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", contact.id)
+            const [{ data: owners }, { data: chatGrants }] = await Promise.all([
+                admin.from("user_roles").select("user_id").eq("role", "supa_admin"),
+                admin.from("whatsapp_access_grants").select("user_id").eq("can_use_chat", true),
+            ])
+            const recipients = new Set([...(owners ?? []).map((row) => row.user_id), ...(chatGrants ?? []).map((row) => row.user_id)])
+            if (recipients.size) await admin.from("notifications").insert([...recipients].map((userId) => ({
+                action_url: "/dashboard/whatsapp",
+                message: `${imported} reply${imported === 1 ? "" : "ies"} recovered from WhatChimp.`,
+                metadata: { contact_id: contact.id, source: "whatsapp" },
+                read: false,
+                title: `WhatsApp reply from ${contact.full_name}`,
+                type: "whatsapp_reply",
+                user_id: userId,
+            })))
+            refreshWhatsAppCenter()
+        }
+        return { success: true, imported }
+    } catch (error) {
+        return { error: error instanceof Error ? error.message : "Could not sync this customer chat." }
+    }
+}
+
+async function claimConversationForReply(context: Awaited<ReturnType<typeof getWhatsAppContext>>, contactId: string) {
+    const { data, error } = await context.adminSupabase.rpc("whatsapp_assign_conversation", {
+        p_contact_id: contactId,
+        p_assignee_id: context.access.user.id,
+        p_actor_id: context.access.user.id,
+        p_force: false,
+    })
+    if (error) throw new Error("Could not reserve this chat for your reply.")
+    if (data !== true) throw new Error("Another teammate is handling this customer. Ask them to release or transfer the chat.")
+}
+
 export async function sendQuickWhatsAppMessage(input: {
     contactId: string
     message: string
@@ -791,6 +927,15 @@ export async function sendQuickWhatsAppMessage(input: {
             .eq("id", input.contactId)
             .single()
         if (error || !contact) return { error: error?.message ?? "Customer not found." }
+
+        const { data: inbound, error: inboundError } = await context.adminSupabase.from("whatsapp_messages")
+            .select("created_at").eq("contact_id", contact.id).eq("direction", "inbound")
+            .order("created_at", { ascending: false }).limit(1).maybeSingle()
+        if (inboundError) return { error: "Could not verify the customer's reply window." }
+        if (!inbound || Date.now() - new Date(inbound.created_at).getTime() >= 24 * 60 * 60 * 1000) {
+            return { error: "The 24-hour reply window is closed. Send an approved template first." }
+        }
+        await claimConversationForReply(context, contact.id)
 
         const connection = await loadWhatsAppConnection(context.adminSupabase)
         const externalMessageId = await sendWhatChimpSessionMessage(connection, contact.phone, message)
@@ -833,6 +978,8 @@ export async function sendSingleWhatsAppTemplate(input: {
         const missing = variables.find((variable, index) => !values[index])
         if (missing) return { error: `Enter ${missing.name.replace(/_/g, " ")} before sending.` }
 
+        await claimConversationForReply(context, contact.id)
+
         const externalMessageId = await sendMetaTemplateMessage({ language: template.language, name: template.name, phone: contact.phone, values })
         const body = renderTemplate(template.body, Object.fromEntries(variables.map((variable, index) => [variable.name, values[index]])))
         const { error: logError } = await context.adminSupabase.from("whatsapp_messages").insert({
@@ -872,14 +1019,14 @@ export async function assignWhatsAppConversation(input: {
                 if (grantError || !grant?.can_use_chat || !(roles ?? []).length) return { error: "Choose a teammate who has Chat access." }
             }
         }
-        const { error } = await context.adminSupabase.from("whatsapp_conversation_assignments").upsert({
-            assigned_at: input.assigneeId ? new Date().toISOString() : null,
-            assigned_to: input.assigneeId,
-            contact_id: input.contactId,
-            status: input.status ?? "open",
-            updated_at: new Date().toISOString(),
+        const { data: updated, error } = await context.adminSupabase.rpc("whatsapp_assign_conversation", {
+            p_contact_id: input.contactId,
+            p_assignee_id: input.assigneeId,
+            p_actor_id: context.access.user.id,
+            p_force: context.access.primaryRole === "supa_admin",
         })
         if (error) return { error: error.message }
+        if (updated !== true) return { error: "Another teammate is handling this customer. Ask them to release the chat first." }
         await writeAudit(context, "assign_whatsapp_conversation", "whatsapp_contact", input.contactId, { assigned_to: input.assigneeId, status: input.status ?? "open" })
         refreshWhatsAppCenter()
         return { success: true }

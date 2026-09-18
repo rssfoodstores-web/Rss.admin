@@ -208,6 +208,37 @@ export async function testWhatChimpConnection(connection: WhatsAppConnectionSecr
     })
 }
 
+export interface WhatChimpConversationItem {
+    id: string
+    sender: string
+    message: string
+    timestamp: string
+    externalId: string | null
+}
+
+export async function readWhatChimpConversation(connection: WhatsAppConnectionSecrets, phone: string, limit = 50): Promise<WhatChimpConversationItem[]> {
+    const normalizedPhone = normalizeWhatsAppPhone(phone)
+    if (!normalizedPhone) throw new Error("The customer phone number is invalid.")
+    const payload = await postWhatChimp(connection, "/whatsapp/get/conversation", {
+        limit: String(Math.min(Math.max(limit, 1), 100)),
+        offset: "1",
+        phone_number: normalizedPhone.replace(/^\+/, ""),
+    })
+    if (!Array.isArray(payload.message)) throw new Error("WhatChimp did not return a conversation list.")
+    return payload.message.flatMap((item): WhatChimpConversationItem[] => {
+        if (!item || typeof item !== "object") return []
+        const row = item as Record<string, unknown>
+        if (typeof row.sender !== "string" || typeof row.message_content !== "string") return []
+        return [{
+            id: String(row.id ?? ""),
+            sender: row.sender,
+            message: row.message_content,
+            timestamp: typeof row.conversation_time === "string" ? row.conversation_time : "",
+            externalId: typeof row.wa_message_id === "string" && row.wa_message_id ? row.wa_message_id : null,
+        }]
+    })
+}
+
 export async function sendWhatChimpSessionMessage(
     connection: WhatsAppConnectionSecrets,
     phone: string,
