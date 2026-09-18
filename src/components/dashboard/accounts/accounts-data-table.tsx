@@ -30,8 +30,6 @@ import {
     DropdownMenuTrigger,
     DropdownMenuLabel,
     DropdownMenuSeparator,
-    DropdownMenuRadioGroup,
-    DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -52,8 +50,22 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 
+interface AccountRow {
+    id: string
+    full_name: string | null
+    company_name: string | null
+    phone: string | null
+    avatar_url: string | null
+    status: string | null
+    role: string
+    roles: string[]
+    points_balance: number | null
+    location_locked: boolean | null
+    updated_at: string | null
+}
+
 // --- Column Definitions ---
-export const columns: ColumnDef<any>[] = [
+export const columns: ColumnDef<AccountRow>[] = [
     {
         accessorKey: "full_name",
         header: ({ column }) => {
@@ -75,7 +87,7 @@ export const columns: ColumnDef<any>[] = [
             return (
                 <div className="flex items-center gap-3">
                     <Avatar className="h-9 w-9">
-                        <AvatarImage src={user.avatar_url} />
+                        <AvatarImage src={user.avatar_url ?? undefined} />
                         <AvatarFallback>{initials}</AvatarFallback>
                     </Avatar>
                     <div className="flex flex-col">
@@ -110,15 +122,17 @@ export const columns: ColumnDef<any>[] = [
         header: "Role",
         cell: ({ row }) => {
             const role = row.getValue("role") as string
-            return <RoleBadge role={role} />
+            const roles = Array.from(new Set([role, ...((row.original.roles as string[] | undefined) ?? [])]))
+            return <div className="flex flex-wrap gap-1">{roles.map((value) => <RoleBadge key={value} role={value} />)}</div>
         },
         filterFn: (row, id, value) => {
-            return value.includes(row.getValue(id))
+            const roles = [row.getValue(id), ...((row.original.roles as string[] | undefined) ?? [])]
+            return (value as string[]).some((selected) => roles.includes(selected))
         },
     },
     {
         accessorKey: "points_balance",
-        header: ({ column }) => (
+        header: () => (
             <div className="text-right">Points</div>
         ),
         cell: ({ row }) => {
@@ -172,7 +186,7 @@ export const columns: ColumnDef<any>[] = [
                             {user.phone && (
                                 <DropdownMenuCheckboxItem
                                     className="cursor-pointer gap-2"
-                                    onSelect={() => copyToClipboard(user.phone, "Phone Number")}
+                                    onSelect={() => copyToClipboard(user.phone ?? "", "Phone Number")}
                                 >
                                     <Copy className="h-4 w-4 text-muted-foreground" /> Copy Phone
                                 </DropdownMenuCheckboxItem>
@@ -197,6 +211,7 @@ function RoleBadge({ role }: { role: string }) {
         case "supa_admin":
             return <Badge variant="destructive" className="gap-1 py-0.5 text-xs"><ShieldAlert className="h-3 w-3" /> Super Admin</Badge>
         case "sub_admin":
+            return <Badge variant="outline" className="gap-1 border-orange-500 text-orange-500 py-0.5 text-xs"><ShieldCheck className="h-3 w-3" /> Sub Admin</Badge>
         case "admin":
             return <Badge variant="outline" className="gap-1 border-orange-500 text-orange-500 py-0.5 text-xs"><ShieldCheck className="h-3 w-3" /> Admin</Badge>
         case "merchant":
@@ -211,7 +226,7 @@ function RoleBadge({ role }: { role: string }) {
 }
 
 // --- Main Data Table Component ---
-export function AccountsDataTable({ data }: { data: any[] }) {
+export function AccountsDataTable({ data }: { data: AccountRow[] }) {
     const [sorting, setSorting] = useState<SortingState>([])
     const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
     const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
@@ -228,20 +243,21 @@ export function AccountsDataTable({ data }: { data: any[] }) {
                 return
             }
 
-            const headers = ["ID", "Full Name", "Company", "Phone", "Status", "Role", "Points Balance", "Location Locked", "Created/Updated"]
+            const csvCell = (value: string | number | boolean | null | undefined) => `"${String(value ?? "").replace(/"/g, '""')}"`
+            const headers = ["ID", "Full Name", "Company", "Phone", "Status", "Roles", "Points Balance", "Location Locked", "Created/Updated"]
             const csvContent = [
                 headers.join(","),
                 ...rows.map(r => [
                     r.id,
-                    `"${r.full_name || ""}"`,
-                    `"${r.company_name || ""}"`,
+                    r.full_name,
+                    r.company_name,
                     r.phone || "",
                     r.status || "Unknown",
-                    r.role || "Customer",
+                    Array.from(new Set([r.role, ...r.roles])).join(", "),
                     r.points_balance || 0,
                     r.location_locked ? "Yes" : "No",
                     r.updated_at || ""
-                ].join(","))
+                ].map(csvCell).join(","))
             ].join("\n")
 
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
@@ -330,7 +346,7 @@ export function AccountsDataTable({ data }: { data: any[] }) {
                             >
                                 All Roles
                             </DropdownMenuCheckboxItem>
-                            {["supa_admin", "admin", "merchant", "agent", "rider", "customer"].map((role) => (
+                            {["supa_admin", "admin", "sub_admin", "merchant", "agent", "rider", "customer"].map((role) => (
                                 <DropdownMenuCheckboxItem
                                     key={role}
                                     checked={(table.getColumn("role")?.getFilterValue() as string[])?.includes(role)}

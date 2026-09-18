@@ -79,35 +79,34 @@ function formatPermissionLabel(count: number) {
     return `${count} page${count === 1 ? "" : "s"} assigned`
 }
 
+function matchesPerson(query: string, name: string, phone: string | null, company = "", role = "") {
+    const text = query.trim().toLowerCase()
+    if (!text) return true
+    const haystack = [name, company, phone ?? "", role].join(" ").toLowerCase()
+    if (haystack.includes(text)) return true
+    const digits = text.replace(/\D/g, "")
+    return digits.length >= 3 && (phone ?? "").replace(/\D/g, "").includes(digits)
+}
+
 export function AdminManagementClient({ initialData }: AdminManagementClientProps) {
     const { toast } = useToast()
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [query, setQuery] = useState("")
+    const [adminQuery, setAdminQuery] = useState("")
     const [selectedUserId, setSelectedUserId] = useState<string>("")
     const [selectedRole, setSelectedRole] = useState<EditableRole>("sub_admin")
     const [selectedPermissions, setSelectedPermissions] = useState<string[]>([])
     const [whatsappCenterAccess, setWhatsappCenterAccess] = useState(false)
 
-    const users = useMemo(() => {
-        const normalizedQuery = query.trim().toLowerCase()
-
-        if (!normalizedQuery) {
-            return initialData.users
-        }
-
-        return initialData.users.filter((user) => {
-            const haystack = [
-                user.fullName,
-                user.companyName ?? "",
-                user.phone ?? "",
-                user.roleSummary,
-            ].join(" ").toLowerCase()
-
-            return haystack.includes(normalizedQuery)
-        })
-    }, [initialData.users, query])
+    const matchingUsers = useMemo(() => initialData.users.filter((user) =>
+        matchesPerson(query, user.fullName, user.phone, user.companyName ?? "", user.roleSummary)
+    ), [initialData.users, query])
+    const users = matchingUsers.slice(0, 50)
+    const visibleAdmins = useMemo(() => initialData.admins.filter((admin) =>
+        matchesPerson(adminQuery, admin.fullName, admin.phone, admin.companyName ?? "", admin.role)
+    ), [initialData.admins, adminQuery])
 
     const selectedUser = useMemo(
         () => initialData.users.find((user) => user.id === selectedUserId) ?? null,
@@ -212,6 +211,7 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                                             className="pl-9"
                                         />
                                     </div>
+                                    <p className="text-xs text-muted-foreground">{matchingUsers.length} matching people. Showing the first {users.length}; type a name or phone number to narrow the list.</p>
                                 </div>
 
                                 <ScrollArea className="h-72 rounded-xl border">
@@ -396,14 +396,19 @@ export function AdminManagementClient({ initialData }: AdminManagementClientProp
                     <CardDescription>
                         Super admins stay read-only here. WhatsApp Center access is separate from other dashboard permissions.
                     </CardDescription>
+                    <div className="relative max-w-sm pt-3">
+                        <Search className="absolute left-3 top-6 h-4 w-4 text-muted-foreground" />
+                        <Input value={adminQuery} onChange={(event) => setAdminQuery(event.target.value)} placeholder="Find admin by name or phone" className="pl-9" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">Showing {visibleAdmins.length} of {initialData.admins.length} people with admin access.</p>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {initialData.admins.length === 0 ? (
+                    {visibleAdmins.length === 0 ? (
                         <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
-                            No admin accounts are available yet.
+                            {adminQuery ? "No admins match that name or phone number." : "No admin accounts are available yet."}
                         </div>
                     ) : (
-                        initialData.admins.map((admin) => (
+                        visibleAdmins.map((admin) => (
                             <div key={admin.id} className="rounded-2xl border p-4">
                                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                                     <div className="flex items-center gap-3">

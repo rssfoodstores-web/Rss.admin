@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { requireAdminRoleAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { fetchAllPages } from "@/lib/supabase-pages"
 import { type AdminRouteKey, getAssignableAdminRoutes, normalizeAssignablePermissionKeys } from "@/lib/admin-routes"
 
 interface AdminManagementResult {
@@ -79,31 +80,28 @@ async function writeAuditLog(
 
 export async function getAdminManagementPageData(): Promise<AdminManagementPageData> {
     const access = await requireAdminRoleAccess(["admin", "supa_admin"], "admins")
+    const adminSupabase = createAdminClient()
     const assignablePermissions = getAssignableAdminRoutes().map((permission) => ({
         href: permission.href,
         key: permission.key,
         title: permission.title,
     }))
 
-    const [{ data: adminRoleRows }, { data: profileRows }, { data: permissionRows }, { data: userRoleRows }, { data: whatsappGrants }] = await Promise.all([
-        access.supabase
-            .from("user_roles")
-            .select("user_id, role, created_at")
-            .in("role", ["admin", "sub_admin", "supa_admin"]),
-        access.supabase
-            .from("profiles")
+    const [adminRoleRows, profileRows, permissionRows, userRoleRows, whatsappGrants] = await Promise.all([
+        fetchAllPages((from, to) => adminSupabase.from("user_roles")
+            .select("user_id, role, created_at").in("role", ["admin", "sub_admin", "supa_admin"])
+            .order("user_id").order("role").range(from, to)),
+        fetchAllPages((from, to) => adminSupabase.from("profiles")
             .select("id, full_name, company_name, phone, avatar_url, updated_at")
-            .order("updated_at", { ascending: false })
-            .limit(300),
-        access.supabase
-            .from("admin_dashboard_permissions")
-            .select("user_id, permission_key"),
-        access.supabase
-            .from("user_roles")
-            .select("user_id, role"),
-        createAdminClient().from("whatsapp_access_grants").select("user_id"),
+            .order("updated_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => adminSupabase.from("admin_dashboard_permissions")
+            .select("user_id, permission_key").order("user_id").order("permission_key").range(from, to)),
+        fetchAllPages((from, to) => adminSupabase.from("user_roles")
+            .select("user_id, role").order("user_id").order("role").range(from, to)),
+        fetchAllPages((from, to) => adminSupabase.from("whatsapp_access_grants")
+            .select("user_id").order("user_id").range(from, to)),
     ])
-    const whatsappUserIds = new Set((whatsappGrants ?? []).map((row) => row.user_id))
+    const whatsappUserIds = new Set(whatsappGrants.map((row) => row.user_id))
 
     const profileMap = new Map(
         (profileRows ?? []).map((profile) => [
@@ -133,7 +131,14 @@ export async function getAdminManagementPageData(): Promise<AdminManagementPageD
         rolesByUser.set(row.user_id, sortRoles(nextRoles))
     }
 
-    const admins = (adminRoleRows ?? [])
+    const adminRoleByUser = new Map<string, (typeof adminRoleRows)[number]>()
+    const rolePriority: Record<string, number> = { supa_admin: 0, admin: 1, sub_admin: 2 }
+    for (const row of adminRoleRows) {
+        const existing = adminRoleByUser.get(row.user_id)
+        if (!existing || rolePriority[row.role] < rolePriority[existing.role]) adminRoleByUser.set(row.user_id, row)
+    }
+
+    const admins = Array.from(adminRoleByUser.values())
         .map((row) => {
             const profile = profileMap.get(row.user_id)
             if (!profile) {

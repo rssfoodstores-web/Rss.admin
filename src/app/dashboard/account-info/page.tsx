@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic"
 
-import { createClient } from "@/lib/supabase/server"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { AccountsDataTable } from "@/components/dashboard/accounts/accounts-data-table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { fetchAllPages } from "@/lib/supabase-pages"
 
 type AccountRole = "supa_admin" | "sub_admin" | "admin" | "merchant" | "agent" | "rider" | "customer"
 
@@ -27,11 +28,10 @@ function getPrimaryAccountRole(options: {
 
 export default async function AccountInfoPage() {
     await requireAdminRouteAccess("account_info")
-    const supabase = await createClient()
+    const supabase = createAdminClient()
 
-    const { data: profiles, error: profilesError } = await supabase
-        .from("profiles")
-        .select(`
+    const [profiles, userRoles, riderProfiles, agentProfiles, merchants] = await Promise.all([
+        fetchAllPages((from, to) => supabase.from("profiles").select(`
             id,
             full_name,
             phone,
@@ -45,14 +45,12 @@ export default async function AccountInfoPage() {
             points_balance,
             referral_code,
             location_locked
-        `)
-        .order("updated_at", { ascending: false })
-
-    if (profilesError) {
-        console.error("AccountInfoPage: Error fetching profiles:", JSON.stringify(profilesError, null, 2))
-    }
-
-    const profileIds = profiles?.map((profile) => profile.id) || []
+        `).order("updated_at", { ascending: false }).order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("user_roles").select("user_id, role").order("user_id").order("role").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("rider_profiles").select("id, status").order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("agent_profiles").select("id, status").order("id").range(from, to)),
+        fetchAllPages((from, to) => supabase.from("merchants").select("id, status").order("id").range(from, to)),
+    ])
 
     const rolesMap = new Map<string, string[]>()
     const riderStatusMap = new Map<string, string | null>()
@@ -62,50 +60,24 @@ export default async function AccountInfoPage() {
     const agentIds = new Set<string>()
     const merchantIds = new Set<string>()
 
-    if (profileIds.length > 0) {
-        const [{ data: userRoles, error: rolesError }, { data: riderProfiles }, { data: agentProfiles }, { data: merchants }] = await Promise.all([
-            supabase
-                .from("user_roles")
-                .select("user_id, role")
-                .in("user_id", profileIds),
-            supabase
-                .from("rider_profiles")
-                .select("id, status")
-                .in("id", profileIds),
-            supabase
-                .from("agent_profiles")
-                .select("id, status")
-                .in("id", profileIds),
-            supabase
-                .from("merchants")
-                .select("id, status")
-                .in("id", profileIds),
-        ])
-
-        if (rolesError) {
-            console.error("AccountInfoPage: Error fetching roles:", rolesError)
-        }
-
-        userRoles?.forEach((userRole) => {
-            const existingRoles = rolesMap.get(userRole.user_id) ?? []
-            existingRoles.push(String(userRole.role ?? ""))
-            rolesMap.set(userRole.user_id, existingRoles)
-        })
-        riderProfiles?.forEach((profile) => {
-            riderIds.add(profile.id)
-            riderStatusMap.set(profile.id, profile.status)
-        })
-        agentProfiles?.forEach((profile) => {
-            agentIds.add(profile.id)
-            agentStatusMap.set(profile.id, profile.status)
-        })
-        merchants?.forEach((profile) => {
-            merchantIds.add(profile.id)
-            merchantStatusMap.set(profile.id, profile.status)
-        })
-    }
-
-    const users = profiles?.map((profile) => {
+    userRoles.forEach((userRole) => {
+        const existingRoles = rolesMap.get(userRole.user_id) ?? []
+        existingRoles.push(String(userRole.role ?? ""))
+        rolesMap.set(userRole.user_id, existingRoles)
+    })
+    riderProfiles.forEach((profile) => {
+        riderIds.add(profile.id)
+        riderStatusMap.set(profile.id, profile.status)
+    })
+    agentProfiles.forEach((profile) => {
+        agentIds.add(profile.id)
+        agentStatusMap.set(profile.id, profile.status)
+    })
+    merchants.forEach((profile) => {
+        merchantIds.add(profile.id)
+        merchantStatusMap.set(profile.id, profile.status)
+    })
+    const users = profiles.map((profile) => {
         const riderStatus = riderStatusMap.get(profile.id) || null
         const agentStatus = agentStatusMap.get(profile.id) || null
         const merchantStatus = merchantStatusMap.get(profile.id) || null
@@ -116,12 +88,20 @@ export default async function AccountInfoPage() {
             roles: rolesMap.get(profile.id) ?? [],
         })
 
+        const roles = Array.from(new Set([
+            ...(rolesMap.get(profile.id) ?? []),
+            ...(merchantIds.has(profile.id) ? ["merchant"] : []),
+            ...(agentIds.has(profile.id) ? ["agent"] : []),
+            ...(riderIds.has(profile.id) ? ["rider"] : []),
+        ]))
+
         return {
             ...profile,
             role: inferredRole,
-            status: agentStatus || merchantStatus || riderStatus,
+            roles,
+            status: inferredRole === "merchant" ? merchantStatus : inferredRole === "agent" ? agentStatus : inferredRole === "rider" ? riderStatus : null,
         }
-    }) || []
+    })
 
     const totalAccounts = users.length
     const pendingApprovals = users.filter((user) => user.status === "pending").length
