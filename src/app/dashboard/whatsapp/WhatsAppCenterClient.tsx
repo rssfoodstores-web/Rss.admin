@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import {
     Activity,
     CheckCircle2,
-    ContactRound,
     FileSpreadsheet,
     KeyRound,
     LayoutDashboard,
@@ -25,8 +24,6 @@ import { cn } from "@/lib/utils"
 import {
     saveWhatsAppAccess,
     saveWhatsAppConnection,
-    saveWhatsAppContact,
-    syncRssCustomers,
     testSavedWhatsAppConnection,
     type WhatsAppCenterPageData,
     type WhatsAppTeamRecord,
@@ -37,14 +34,13 @@ import { WhatsAppQuotaBanner } from "./WhatsAppQuotaBanner"
 import { SecureCsvCampaignWorkspace } from "./SecureCsvCampaignWorkspace"
 import { TemplateWorkspace } from "./TemplateWorkspace"
 
-type TabKey = "builder" | "campaigns" | "contacts" | "health" | "home" | "send" | "settings" | "templates"
+type TabKey = "builder" | "campaigns" | "health" | "home" | "send" | "settings" | "templates"
 
 const tabs: Array<{ icon: typeof LayoutDashboard; key: TabKey; label: string }> = [
     { icon: LayoutDashboard, key: "home", label: "Home" },
     { icon: MessageCircleMore, key: "send", label: "Chat with customers" },
     { icon: Sparkles, key: "templates", label: "Templates" },
     { icon: ShieldCheck, key: "health", label: "Account health" },
-    { icon: ContactRound, key: "contacts", label: "Customers" },
     { icon: FileSpreadsheet, key: "builder", label: "CSV Builder" },
     { icon: Activity, key: "campaigns", label: "Campaigns" },
     { icon: Settings2, key: "settings", label: "Team & settings" },
@@ -120,7 +116,6 @@ function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [accessLevel, setAccessLevel] = useState(member.accessLevel)
-    const [contacts, setContacts] = useState(member.canManageContacts)
     const [templates, setTemplates] = useState(member.canManageTemplates)
     const [campaigns, setCampaigns] = useState(member.canSendCampaigns)
     const isOwner = member.accessLevel === "owner"
@@ -144,7 +139,6 @@ function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
             </select>
             <div className="flex flex-wrap gap-3 text-xs">
                 {[
-                    { checked: contacts, label: "Contacts", setChecked: setContacts },
                     { checked: templates, label: "Templates", setChecked: setTemplates },
                     { checked: campaigns, label: "Campaigns", setChecked: setCampaigns },
                 ].map((permission) => (
@@ -166,7 +160,7 @@ function TeamAccessRow({ member }: { member: WhatsAppTeamRecord }) {
                 onClick={() => runAction(
                     () => saveWhatsAppAccess({
                         accessLevel: accessLevel === "owner" ? "none" : accessLevel,
-                        canManageContacts: contacts,
+                        canManageContacts: member.canManageContacts,
                         canManageTemplates: templates,
                         canSendCampaigns: campaigns,
                         userId: member.userId,
@@ -187,7 +181,6 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
     const router = useRouter()
     const [isPending, startTransition] = useTransition()
     const [activeTab, setActiveTab] = useState<TabKey>(initialData.connection ? "home" : "settings")
-    const [contactForm, setContactForm] = useState({ email: "", fullName: "", labels: "", optedIn: false, phone: "" })
     const [connectionForm, setConnectionForm] = useState({
         accountLabel: initialData.connection?.accountLabel ?? "RSS Foods WhatsApp",
         apiToken: "",
@@ -201,7 +194,6 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
     const visibleTabs = tabs.filter((tab) => {
         if (tab.key === "settings") return initialData.access.canManageSettings
         if (tab.key === "templates") return initialData.access.canManageTemplates
-        if (tab.key === "contacts") return initialData.access.canManageContacts
         if (tab.key === "campaigns" || tab.key === "builder") return initialData.access.canSendCampaigns
         return true
     })
@@ -265,8 +257,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
 
             {activeTab === "home" ? (
                 <div className="space-y-6">
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <StatCard icon={Users} label="Customers" value={initialData.stats.activeContacts} help="Ready in the contact book" />
+                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                         <StatCard icon={Sparkles} label="Approved templates" value={initialData.stats.approvedTemplates} help="Available for campaigns" />
                         <StatCard icon={CheckCircle2} label="Delivered" value={initialData.stats.deliveredMessages} help="Recent RSS message log" />
                         <StatCard icon={Activity} label="Failed" value={initialData.stats.failedMessages} help="Messages needing attention" />
@@ -276,7 +267,7 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
                             <h2 className="text-xl font-black text-gray-900 dark:text-white">Three-step workflow</h2>
                             <div className="mt-5 space-y-4">
                                 {[
-                                    ["1", "Add customers", "Sync RSS users or add a WhatsApp contact."],
+                                    ["1", "Choose an audience", "Build an audience from RSS data or upload a CSV."],
                                     ["2", "Prepare a template", "Use friendly variables like {{customer_name}}."],
                                     ["3", "Send confidently", "Preview, select consented customers and send."],
                                 ].map(([number, title, description]) => (
@@ -310,13 +301,6 @@ export function WhatsAppCenterClient({ initialData }: { initialData: WhatsAppCen
             {activeTab === "templates" ? <TemplateWorkspace canSync={Boolean(initialData.connection?.hasMetaToken)} templates={initialData.templates} /> : null}
 
             {activeTab === "health" ? <AccountHealthWorkspace /> : null}
-
-            {activeTab === "contacts" ? (
-                <div className="grid gap-6 xl:grid-cols-[0.8fr_1.2fr]">
-                    <SectionCard><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#128C7E]">Contact book</p><h2 className="mt-2 text-2xl font-black">Add a customer</h2><div className="mt-6 space-y-4"><Input placeholder="Customer name" value={contactForm.fullName} onChange={(event) => setContactForm((current) => ({ ...current, fullName: event.target.value }))} /><Input type="tel" placeholder="0801 234 5678" value={contactForm.phone} onChange={(event) => setContactForm((current) => ({ ...current, phone: event.target.value }))} /><Input type="email" placeholder="Email (optional)" value={contactForm.email} onChange={(event) => setContactForm((current) => ({ ...current, email: event.target.value }))} /><Input placeholder="Labels separated by commas" value={contactForm.labels} onChange={(event) => setContactForm((current) => ({ ...current, labels: event.target.value }))} /><label className="flex gap-3 rounded-xl bg-amber-50 p-4 text-sm dark:bg-amber-950/20"><input type="checkbox" checked={contactForm.optedIn} onChange={(event) => setContactForm((current) => ({ ...current, optedIn: event.target.checked }))} /><span><strong>Customer gave WhatsApp consent.</strong><br /><span className="text-xs text-gray-500">Only tick this when RSS has permission to message them.</span></span></label><Button disabled={isPending} className="w-full bg-[#128C7E]" onClick={() => runAction(() => saveWhatsAppContact({ ...contactForm, labels: contactForm.labels.split(",") }), "Customer saved.", router, startTransition)}>Save customer</Button><Button variant="outline" disabled={isPending} className="w-full" onClick={() => runAction(syncRssCustomers, "RSS customers synced. New contacts remain opted out until consent is recorded.", router, startTransition)}><RefreshCw className="mr-2 h-4 w-4" />Sync RSS customers</Button></div></SectionCard>
-                    <SectionCard><div><h2 className="text-xl font-black">Customers</h2><p className="mt-1 text-sm text-gray-500">Synced RSS users are opted out by default for safety.</p></div><div className="mt-5 max-h-[650px] overflow-auto divide-y divide-gray-100 dark:divide-zinc-800">{initialData.contacts.length ? initialData.contacts.map((contact) => <div key={contact.id} className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><p className="font-bold">{contact.fullName}</p><p className="text-sm text-gray-500">{contact.phone}</p><div className="mt-2 flex flex-wrap gap-1">{contact.labels.map((label) => <Badge key={label} variant="outline">{label}</Badge>)}</div></div><Badge className={contact.optedIn ? "bg-emerald-100 text-emerald-700" : "bg-gray-100 text-gray-500"}>{contact.optedIn ? "Consented" : "Opted out"}</Badge></div>) : <p className="py-10 text-center text-sm text-gray-500">No customers yet.</p>}</div></SectionCard>
-                </div>
-            ) : null}
 
             {activeTab === "builder" ? <SecureCsvCampaignWorkspace campaigns={initialData.campaigns} mode="builder" templates={initialData.templates} workerConfigured={initialData.campaignWorkerConfigured} /> : null}
 
