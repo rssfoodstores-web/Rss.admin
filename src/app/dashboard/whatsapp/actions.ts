@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
+import { buildAbsoluteUrl, getConfiguredAdminSiteUrl } from "@/lib/site-url"
 import { readWhatsAppHealth, type WhatsAppHealthSnapshot } from "@/lib/whatsapp-health"
 import { getWhatsAppQuotaStatus, type WhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
 import { isCampaignSchedulerReady } from "@/lib/whatsapp-campaign-worker"
@@ -143,6 +144,7 @@ export interface WhatsAppChatSnapshot {
     contacts: WhatsAppContactRecord[]
     conversationAssignments: WhatsAppConversationAssignment[]
     lastWebhookAt: string | null
+    lastWebhookReceipt: { at: string; errorCode: string | null; outcome: string } | null
     messages: WhatsAppMessageRecord[]
 }
 
@@ -453,7 +455,9 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
             phoneNumberId: context.whatsappAccess.canManageSettings ? connectionRow.phone_number_id : "",
             wabaId: context.whatsappAccess.canManageSettings ? connectionRow.waba_id ?? "" : "",
             webhookSecret: context.whatsappAccess.canManageSettings ? connectionRow.webhook_secret : "",
-            webhookUrl: context.whatsappAccess.canManageSettings ? `${process.env.NEXT_PUBLIC_APP_URL ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "")}/api/webhooks/whatchimp?key=${connectionRow.webhook_secret}` : "",
+            webhookUrl: context.whatsappAccess.canManageSettings
+                ? buildAbsoluteUrl(getConfiguredAdminSiteUrl(), "/api/webhooks/whatchimp", { key: connectionRow.webhook_secret })
+                : "",
         } : null,
         contacts: context.whatsappAccess.canSendMessages ? contacts : [],
         conversationAssignments: context.whatsappAccess.canSendMessages ? conversationAssignments : [],
@@ -473,7 +477,7 @@ export async function getWhatsAppCenterPageData(): Promise<WhatsAppCenterPageDat
 export async function getWhatsAppChatSnapshot(): Promise<WhatsAppChatSnapshot> {
     const context = await requireCapability("messages")
     const admin = context.adminSupabase
-    const [contactsResult, messagesResult, assignmentsResult, webhookResult] = await Promise.all([
+    const [contactsResult, messagesResult, assignmentsResult, webhookResult, receiptResult] = await Promise.all([
         admin.from("whatsapp_contacts").select("id, source, full_name, phone, email, labels, custom_fields, opted_in, is_active")
             .order("last_message_at", { ascending: false, nullsFirst: false }).order("updated_at", { ascending: false }).limit(250),
         admin.from("whatsapp_messages").select("id, contact_id, body, direction, status, error_message, sent_by, created_at, whatsapp_contacts(full_name)")
@@ -482,8 +486,10 @@ export async function getWhatsAppChatSnapshot(): Promise<WhatsAppChatSnapshot> {
         admin.from("whatsapp_messages").select("created_at").eq("direction", "inbound")
             .contains("metadata", { source: "incoming_webhook" })
             .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        admin.from("whatsapp_inbound_receipts").select("received_at,outcome,error_code")
+            .order("received_at", { ascending: false }).limit(1).maybeSingle(),
     ])
-    const firstError = [contactsResult.error, messagesResult.error, assignmentsResult.error, webhookResult.error].find(Boolean)
+    const firstError = [contactsResult.error, messagesResult.error, assignmentsResult.error, webhookResult.error, receiptResult.error].find(Boolean)
     if (firstError) throw new Error(firstError.message)
 
     const assigneeIds = Array.from(new Set((assignmentsResult.data ?? []).map((item) => item.assigned_to).filter((id): id is string => Boolean(id))))
@@ -513,6 +519,11 @@ export async function getWhatsAppChatSnapshot(): Promise<WhatsAppChatSnapshot> {
             status: row.status as WhatsAppConversationAssignment["status"],
         })),
         lastWebhookAt: webhookResult.data?.created_at ?? null,
+        lastWebhookReceipt: receiptResult.data ? {
+            at: receiptResult.data.received_at,
+            errorCode: receiptResult.data.error_code ?? null,
+            outcome: receiptResult.data.outcome,
+        } : null,
         messages: (messagesResult.data ?? []).map((row) => {
             const related = Array.isArray(row.whatsapp_contacts) ? row.whatsapp_contacts[0] : row.whatsapp_contacts
             return {
@@ -846,7 +857,7 @@ export async function syncWhatsAppTemplateStatuses(): Promise<ActionResult> {
     }
 }
 
-export async function syncWhatsAppConversation(contactId: string): Promise<ActionResult & { imported?: number }> {
+export async function syncWhatsAppConversation(contactId: string): Promise<ActionResult & { imported?: number; historyCount?: number; subscriberCount?: number }> {
     try {
         const context = await requireCapability("messages")
         const admin = context.adminSupabase
@@ -855,9 +866,10 @@ export async function syncWhatsAppConversation(contactId: string): Promise<Actio
         if (contactError || !contact) return { error: "Customer chat not found." }
         const connection = await loadWhatsAppConnection(admin)
         const history = await readWhatChimpConversation(connection, contact.phone)
+        const subscriberCount = history.filter((row) => row.sender.trim().toLowerCase() === "subscriber").length
         let imported = 0
         for (const row of history) {
-            if (row.sender.toLowerCase() !== "subscriber" || !row.message.trim()) continue
+            if (row.sender.trim().toLowerCase() !== "subscriber" || !row.message.trim()) continue
             const externalId = row.externalId ?? (row.id ? `whatchimp:${row.id}` : null)
             if (!externalId) continue
             const timestamp = /(?:Z|[+-]\d\d:\d\d)$/.test(row.timestamp)
@@ -896,7 +908,7 @@ export async function syncWhatsAppConversation(contactId: string): Promise<Actio
             })))
             refreshWhatsAppCenter()
         }
-        return { success: true, imported }
+        return { success: true, imported, historyCount: history.length, subscriberCount }
     } catch (error) {
         return { error: error instanceof Error ? error.message : "Could not sync this customer chat." }
     }

@@ -39,9 +39,11 @@ export function ChatWorkspace({ data }: { data: WhatsAppCenterPageData }) {
         contacts: data.contacts,
         conversationAssignments: data.conversationAssignments,
         lastWebhookAt: null,
+        lastWebhookReceipt: null,
         messages: data.messages,
     })
     const [refreshError, setRefreshError] = useState<string | null>(null)
+    const [historyStatus, setHistoryStatus] = useState<string | null>(null)
     const [syncing, setSyncing] = useState(false)
     const syncingRef = useRef(false)
     const seenInboundIds = useRef(new Set(data.messages.filter((item) => item.direction === "inbound").map((item) => item.id)))
@@ -71,13 +73,17 @@ export function ChatWorkspace({ data }: { data: WhatsAppCenterPageData }) {
         try {
             const result = await syncWhatsAppConversation(selectedId)
             if (result.error) {
+                setHistoryStatus(`WhatChimp history check failed: ${result.error}`)
                 if (!silent) toast.error(result.error)
-                else setRefreshError(`WhatChimp history sync failed: ${result.error}`)
                 return
             }
+            setHistoryStatus(result.subscriberCount
+                ? `WhatChimp returned ${result.subscriberCount} customer repl${result.subscriberCount === 1 ? "y" : "ies"} for this chat; ${result.imported ?? 0} newly recovered.`
+                : `WhatChimp returned ${result.historyCount ?? 0} messages but no customer replies for this number. Check that this is the same WhatsApp number/account.`)
             await refreshChats()
-            if (!silent) toast.success(result.imported ? `Recovered ${result.imported} customer repl${result.imported === 1 ? "y" : "ies"}.` : "Chat is up to date.")
+            if (!silent) toast.info(result.imported ? `Recovered ${result.imported} customer repl${result.imported === 1 ? "y" : "ies"}.` : "History checked; see the result above the chat list.")
         } catch {
+            setHistoryStatus("Could not contact WhatChimp to check this chat.")
             if (!silent) toast.error("Could not sync this chat from WhatChimp.")
         } finally {
             syncingRef.current = false
@@ -142,7 +148,8 @@ export function ChatWorkspace({ data }: { data: WhatsAppCenterPageData }) {
                     <p className="mt-1 text-xs text-gray-500">Campaign replies and direct conversations</p>
                     <p className="mt-1 text-xs text-emerald-700">Updates every 5 seconds · Checked {shortTime(snapshot.checkedAt)}</p>
                     {refreshError ? <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-700">{refreshError}</p> : null}
-                    {!snapshot.lastWebhookAt ? <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">Incoming webhook not verified yet. A Supa Admin must enable “Trigger Webhook for Incoming Message” in WhatChimp and paste the URL from Team & settings. Opened chats also sync from WhatChimp every 30 seconds.</p> : null}
+                    {historyStatus ? <p className="mt-2 rounded-lg bg-blue-50 p-2 text-xs text-blue-900">{historyStatus}</p> : null}
+                    {!snapshot.lastWebhookReceipt ? <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">RSS has received no incoming webhook. In WhatChimp, enable “Trigger Webhook for Incoming Message” and paste the URL from Team & settings. Sending another template will not repair this connection.</p> : snapshot.lastWebhookReceipt.outcome !== "stored" ? <p className="mt-2 rounded-lg bg-red-50 p-2 text-xs text-red-800">WhatChimp reached RSS {shortTime(snapshot.lastWebhookReceipt.at)}, but RSS {snapshot.lastWebhookReceipt.outcome === "ignored" ? "could not read a customer message" : "could not save the reply"} ({snapshot.lastWebhookReceipt.errorCode ?? "unknown error"}).</p> : null}
                     <div className="relative mt-4"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" /><Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name or number" /></div>
                 </div>
                 <div className="max-h-[590px] overflow-y-auto">
@@ -175,7 +182,7 @@ export function ChatWorkspace({ data }: { data: WhatsAppCenterPageData }) {
                 <div className="border-t bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
                     {handledByAnother ? <p className="mb-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-900">{assignment?.assignedToName} is handling this customer. Ask them to transfer or release the chat before replying.</p> : null}
                     {windowOpen ? <div className="flex items-end gap-3"><Textarea className="min-h-12 resize-none rounded-2xl" rows={2} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Type a message" disabled={handledByAnother} /><Button size="icon" className="h-12 w-12 shrink-0 rounded-full bg-[#25D366]" disabled={isPending || handledByAnother || !message.trim()} onClick={() => run(() => sendQuickWhatsAppMessage({ contactId: selected.id, message }), "Message sent.", () => setMessage(""))}>{isPending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</Button></div> : <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/20">
-                        <div className="flex gap-3"><LockKeyhole className="h-5 w-5 shrink-0 text-amber-700" /><div><p className="font-bold text-amber-950 dark:text-amber-100">Send a template to open this chat</p><p className="mt-1 text-xs text-amber-800 dark:text-amber-200">When the customer replies, RSS can chat normally for 24 hours.</p></div></div>
+                        <div className="flex gap-3"><LockKeyhole className="h-5 w-5 shrink-0 text-amber-700" /><div><p className="font-bold text-amber-950 dark:text-amber-100">{thread.some((item) => item.direction === "outbound") && !snapshot.lastWebhookAt ? "RSS has not received this customer's reply" : "Send a template to open this chat"}</p><p className="mt-1 text-xs text-amber-800 dark:text-amber-200">{thread.some((item) => item.direction === "outbound") && !snapshot.lastWebhookAt ? "Do not send another template to fix this. Check the incoming connection above, then use Sync chat." : "When the customer replies, RSS can chat normally for 24 hours."}</p></div></div>
                         <select className="mt-4 h-11 w-full rounded-xl border bg-white px-3 text-sm dark:bg-zinc-900" value={templateId} onChange={(event) => { setTemplateId(event.target.value); setValues({}) }}>{approvedTemplates.map((template) => <option key={template.id} value={template.id}>{template.displayName}</option>)}</select>
                         {selectedTemplate?.variables.map((variable) => <label key={variable.name} className="mt-3 block"><span className="text-xs font-bold capitalize">{variable.name.replace(/_/g, " ")}</span><Input className="mt-1 bg-white dark:bg-zinc-900" value={values[variable.name] ?? ""} onChange={(event) => setValues((current) => ({ ...current, [variable.name]: event.target.value }))} placeholder={`Type ${variable.name.replace(/_/g, " ")}`} /></label>)}
                         <Button className="mt-4 w-full bg-[#128C7E]" disabled={isPending || handledByAnother || !templateId} onClick={() => run(() => sendSingleWhatsAppTemplate({ contactId: selected.id, templateId, values }), "Template sent. We will show the reply in this chat.")}>{isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Send template</Button>

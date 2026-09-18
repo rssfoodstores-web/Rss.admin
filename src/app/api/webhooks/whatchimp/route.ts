@@ -13,6 +13,14 @@ function string(value: unknown): string | null {
     return typeof value === "string" && value.trim() ? value.trim() : null
 }
 
+function parsePayload(raw: string, contentType: string): unknown {
+    try { return JSON.parse(raw) as unknown } catch { /* Some providers post form data. */ }
+    if (!contentType.includes("application/x-www-form-urlencoded")) return null
+    return Object.fromEntries([...new URLSearchParams(raw)].map(([key, value]) => {
+        try { return [key, JSON.parse(value) as unknown] } catch { return [key, value] }
+    }))
+}
+
 function findString(value: unknown, keys: string[]): string | null {
     const item = record(value)
     if (!item) return null
@@ -91,15 +99,31 @@ export async function POST(request: NextRequest) {
     if (Number(request.headers.get("content-length") ?? 0) > 256_000) {
         return NextResponse.json({ error: "Webhook payload too large" }, { status: 413 })
     }
-    const payload: unknown = await request.json().catch(() => null)
+    const raw = await request.text().catch(() => "")
+    if (raw.length > 256_000) return NextResponse.json({ error: "Webhook payload too large" }, { status: 413 })
+    const payload = parsePayload(raw, request.headers.get("content-type") ?? "")
     const incoming = parseIncoming(payload)
-    if (!incoming.length) return NextResponse.json({ received: true, stored: false })
+    const payloadKeys = Object.keys(record(payload) ?? {}).slice(0, 20).map((key) => key.slice(0, 64))
+    const { data: receipt, error: receiptError } = await admin.from("whatsapp_inbound_receipts").insert({
+        outcome: "received", message_count: incoming.length, payload_keys: payloadKeys,
+    }).select("id").single()
+    if (receiptError || !receipt) return NextResponse.json({ error: "Could not record webhook receipt" }, { status: 500 })
+    const finish = async (outcome: "failed" | "ignored" | "stored", errorCode: string | null, count: number) => {
+        await admin.from("whatsapp_inbound_receipts").update({ outcome, error_code: errorCode, message_count: count }).eq("id", receipt.id)
+    }
+    if (!incoming.length) {
+        await finish("ignored", "no_supported_message", 0)
+        return NextResponse.json({ received: true, stored: false })
+    }
 
     let stored = 0
     for (const item of incoming) {
         let { data: contact, error: contactError } = await admin.from("whatsapp_contacts")
             .select("id, full_name").eq("phone", item.phone).maybeSingle()
-        if (contactError) return NextResponse.json({ error: "Could not find customer" }, { status: 500 })
+        if (contactError) {
+            await finish("failed", "contact_lookup", stored)
+            return NextResponse.json({ error: "Could not find customer" }, { status: 500 })
+        }
         if (!contact) {
             const inserted = await admin.from("whatsapp_contacts").upsert({
                 full_name: item.name ?? item.phone,
@@ -108,12 +132,18 @@ export async function POST(request: NextRequest) {
                 phone: item.phone,
                 source: "import",
             }, { onConflict: "phone", ignoreDuplicates: true })
-            if (inserted.error) return NextResponse.json({ error: "Could not create customer chat" }, { status: 500 })
+            if (inserted.error) {
+                await finish("failed", "contact_create", stored)
+                return NextResponse.json({ error: "Could not create customer chat" }, { status: 500 })
+            }
             const lookedUp = await admin.from("whatsapp_contacts").select("id, full_name").eq("phone", item.phone).single()
             contact = lookedUp.data
             contactError = lookedUp.error
         }
-        if (contactError || !contact) return NextResponse.json({ error: "Could not identify customer" }, { status: 500 })
+        if (contactError || !contact) {
+            await finish("failed", "contact_identify", stored)
+            return NextResponse.json({ error: "Could not identify customer" }, { status: 500 })
+        }
 
         const { error: messageError } = await admin.from("whatsapp_messages").insert({
             body: item.body,
@@ -125,7 +155,10 @@ export async function POST(request: NextRequest) {
             status: "received",
         })
         if (messageError?.code === "23505") continue
-        if (messageError) return NextResponse.json({ error: "Could not save reply" }, { status: 500 })
+        if (messageError) {
+            await finish("failed", "message_insert", stored)
+            return NextResponse.json({ error: "Could not save reply" }, { status: 500 })
+        }
         stored += 1
 
         await Promise.all([
@@ -150,5 +183,6 @@ export async function POST(request: NextRequest) {
         })))
     }
 
+    await finish("stored", null, stored)
     return NextResponse.json({ received: true, stored })
 }
