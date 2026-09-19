@@ -77,13 +77,17 @@ function parseIncoming(payload: unknown): IncomingMessage[] {
     }
     if (metaMessages.length) return metaMessages
 
-    const phone = normalizeWhatsAppPhone(findString(root, ["wa_id", "from", "sender", "phone", "phone_number"]) ?? "")
-    const body = findString(root, ["message_content", "body", "text", "caption", "message"])
+    // WhatChimp's incoming-message webhook uses chat_id and user_message.
+    const rawPhone = typeof root.chat_id === "number"
+        ? String(root.chat_id)
+        : findString(root, ["chat_id", "wa_id", "from", "phone", "phone_number", "sender"])
+    const phone = normalizeWhatsAppPhone(rawPhone ?? "")
+    const body = findString(root, ["user_message", "message_content", "body", "text", "caption", "message"])
     if (!phone || !body) return []
     return [{
         body,
         externalId: findString(root, ["wa_message_id", "message_id", "wamid"]),
-        name: findString(root, ["profile_name", "customer_name", "name"]),
+        name: findString(root, ["profile_name", "customer_name", "first_name", "name"]),
         phone,
     }]
 }
