@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
-import { CheckCheck, Clock3, Loader2, LockKeyhole, RefreshCw, Search, Send, UserCheck, Users } from "lucide-react"
+import { CheckCheck, Clock3, Loader2, LockKeyhole, RefreshCw, Search, Send, UserCheck, UserMinus, Users } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -196,7 +196,7 @@ export function ChatWorkspace({ data }: { data: WhatsAppCenterPageData }) {
                 <div className="mt-6 rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800"><div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-emerald-600" /><p className="text-xs font-bold uppercase">24-hour status</p></div><p className="mt-2 text-sm">{windowOpen ? "Customer replied recently. Normal chat is available." : "Closed. Begin with an approved template."}</p></div>
                 <div className="mt-6"><div className="flex items-center gap-2"><Users className="h-4 w-4" /><p className="font-bold">Who is helping?</p></div><p className="mt-1 text-xs text-gray-500">Assigning prevents two admins answering at once.</p>
                     <select className="mt-3 h-11 w-full rounded-xl border bg-white px-3 text-sm dark:bg-zinc-900" value={assignment?.assignedTo ?? ""} disabled={isPending || (handledByAnother && !canTakeOver)} onChange={(event) => run(() => assignWhatsAppConversation({ assigneeId: event.target.value || null, contactId: selected.id }), "Conversation assignment updated.")}><option value="">Nobody — available</option>{data.team.filter((member) => member.canSendMessages).map((member) => <option key={member.userId} value={member.userId}>{member.fullName}{member.userId === data.currentUserId ? " (you)" : ""}</option>)}</select>
-                    <Button variant="outline" className="mt-3 w-full" disabled={isPending || assignment?.assignedTo === data.currentUserId || (handledByAnother && !canTakeOver)} onClick={() => run(() => assignWhatsAppConversation({ assigneeId: data.currentUserId, contactId: selected.id }), "This customer is now assigned to you.")}><UserCheck className="mr-2 h-4 w-4" />{handledByAnother && canTakeOver ? "Take over chat" : "Assign to me"}</Button>
+                    {assignment?.assignedTo === data.currentUserId ? <Button variant="outline" className="mt-3 w-full" disabled={isPending} onClick={() => run(() => assignWhatsAppConversation({ assigneeId: null, contactId: selected.id }), "Customer unassigned. This chat is available to the team.")}><UserMinus className="mr-2 h-4 w-4" />Unassign customer</Button> : <Button variant="outline" className="mt-3 w-full" disabled={isPending || (handledByAnother && !canTakeOver)} onClick={() => run(() => assignWhatsAppConversation({ assigneeId: data.currentUserId, contactId: selected.id }), "This customer is now assigned to you.")}><UserCheck className="mr-2 h-4 w-4" />{handledByAnother && canTakeOver ? "Take over chat" : "Assign to me"}</Button>}
                 </div>
             </aside>
         </div>
