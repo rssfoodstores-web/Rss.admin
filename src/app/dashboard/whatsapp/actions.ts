@@ -762,6 +762,7 @@ export async function saveWhatsAppTemplate(input: {
         const context = await requireCapability("templates")
         const name = input.name.trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "")
         const body = input.body.trim()
+        if (input.category === "authentication") return { error: "Login or security code templates are locked until the dedicated OTP builder is ready." }
         if (!name) return { error: "Enter a template name." }
         if (!body) return { error: "Write the template message." }
 
@@ -804,6 +805,7 @@ export async function submitWhatsAppTemplate(templateId: string): Promise<Action
             .eq("id", templateId)
             .single()
         if (error || !template) return { error: error?.message ?? "Template not found." }
+        if (template.category === "authentication") return { error: "Login or security code templates cannot be submitted until the dedicated OTP builder is ready." }
 
         const externalId = await submitMetaTemplate({
             body: template.body,
