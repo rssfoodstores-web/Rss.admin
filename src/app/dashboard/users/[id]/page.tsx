@@ -4,6 +4,7 @@ import Image from "next/image"
 import Link from "next/link"
 import { notFound } from "next/navigation"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { formatDateTime, getOrderStatusClass, getPaymentStatusClass, getSettlementStatusClass, labelize, shortId } from "@/lib/admin-display"
 import { formatKobo } from "@/lib/money"
 import { cn } from "@/lib/utils"
@@ -533,8 +534,10 @@ export default async function UserProfilePage({ params }: PageProps) {
     const access = await requireAdminRouteAccess("account_info")
     const { id } = await params
     const supabase = access.supabase
+    const adminSupabase = createAdminClient()
 
     const [
+        authUserResult,
         profileResult,
         userRolesResult,
         riderResult,
@@ -557,6 +560,7 @@ export default async function UserProfilePage({ params }: PageProps) {
         referredUsersResult,
         supportConversationsResult,
     ] = await Promise.all([
+        adminSupabase.auth.admin.getUserById(id),
         supabase
             .from("profiles")
             .select("id, full_name, phone, avatar_url, updated_at, address, company_name, zip_code, state, street_address, house_number, referral_code, referred_by, points_balance, location_locked, update_requested, fcm_token, location_update_requested_at, location_last_verified_at")
@@ -654,6 +658,11 @@ export default async function UserProfilePage({ params }: PageProps) {
     ])
 
     const profile = (profileResult.data ?? null) as ProfileRow | null
+    const accountEmail = authUserResult.data.user?.email ?? null
+
+    if (authUserResult.error) {
+        console.error("UserProfilePage: auth email lookup failed", authUserResult.error)
+    }
 
     if (!profile) {
         console.error("UserProfilePage: profile not found", profileResult.error)
@@ -807,6 +816,9 @@ export default async function UserProfilePage({ params }: PageProps) {
                         <div className="space-y-3">
                             <div>
                                 <h1 className="text-3xl font-bold tracking-tight text-foreground">{profile.full_name || "Unknown user"}</h1>
+                                <p className="mt-1 break-all text-sm font-medium text-muted-foreground">
+                                    {accountEmail ?? "No email on file"}
+                                </p>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                     {roles.map((role) => (
                                         <Badge key={role} variant="outline" className={cn("capitalize", getRoleTone(role))}>
@@ -910,6 +922,7 @@ export default async function UserProfilePage({ params }: PageProps) {
                                 <CardDescription>Core admin context for this user account.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-1">
+                                <DetailListItem label="Email" value={accountEmail || "No email on file"} />
                                 <DetailListItem label="Phone" value={profile.phone || "No phone on file"} />
                                 <DetailListItem label="Address" value={buildAddress(profile)} />
                                 <DetailListItem label="Referral code" value={profile.referral_code || "Not generated"} />
