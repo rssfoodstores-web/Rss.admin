@@ -200,8 +200,10 @@ const navItems: NavItem[] = [
 export function NavMain({
     mobile = false,
     allowedRouteKeys,
+    activityCounts = {},
 }: {
     allowedRouteKeys: AdminRouteKey[]
+    activityCounts?: Partial<Record<AdminRouteKey, number>>
     mobile?: boolean
 }) {
     const pathname = usePathname()
@@ -234,6 +236,7 @@ export function NavMain({
                     <TooltipProvider>
                         {filteredItems.map((item, index) => {
                             const Icon = item.icon
+                            const count = activityCounts[item.key] ?? 0
                             // Check for exact match for dashboard, or startsWith for other routes
                             const isActive = item.href === "/dashboard"
                                 ? pathname === "/dashboard"
@@ -252,6 +255,9 @@ export function NavMain({
                                 >
                                     <Icon className="h-4 w-4" />
                                     {!collapsed && <span>{item.title}</span>}
+                                    {count > 0 ? (
+                                        <span className={cn("ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold", isActive ? "bg-white/20 text-white" : "bg-orange-500 text-white", collapsed && "absolute -right-1 -top-1 min-w-5 text-center")}>{count > 99 ? "99+" : count}</span>
+                                    ) : null}
                                 </Link>
                             )
 

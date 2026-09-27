@@ -255,7 +255,7 @@ export default async function ApprovalsPage() {
                 </Card>
             </div>
 
-            <Card className="shadow-sm border-border/60 animate-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both">
+            <Card id="pricing-approvals" className="scroll-mt-24 shadow-sm border-border/60 animate-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both">
                 <CardHeader className="pb-4">
                     <CardTitle className="flex items-center gap-2">
                         <Tags className="h-5 w-5 text-orange-500" />
@@ -366,7 +366,7 @@ export default async function ApprovalsPage() {
             </Card>
 
             <div className="grid gap-6 xl:grid-cols-3 animate-in slide-in-from-bottom-8 duration-700 delay-300 fill-mode-both">
-                <Card className="shadow-sm border-border/60">
+                <Card id="merchant-approvals" className="scroll-mt-24 shadow-sm border-border/60">
                     <CardHeader className="pb-4">
                         <CardTitle className="flex items-center gap-2">
                             <Store className="h-5 w-5 text-blue-500" />
@@ -414,7 +414,7 @@ export default async function ApprovalsPage() {
                     </CardContent>
                 </Card>
 
-                <Card className="shadow-sm border-border/60">
+                <Card id="rider-approvals" className="scroll-mt-24 shadow-sm border-border/60">
                     <CardHeader className="pb-4">
                         <CardTitle className="flex items-center gap-2">
                             <Bike className="h-5 w-5 text-emerald-500" />
@@ -462,7 +462,7 @@ export default async function ApprovalsPage() {
                     </CardContent>
                 </Card>
 
-                <Card className="shadow-sm border-border/60">
+                <Card id="agent-approvals" className="scroll-mt-24 shadow-sm border-border/60">
                     <CardHeader className="pb-4">
                         <CardTitle className="flex items-center gap-2">
                             <Users className="h-5 w-5 text-indigo-500" />

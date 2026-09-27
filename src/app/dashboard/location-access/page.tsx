@@ -125,7 +125,7 @@ export default async function LocationAccessPage() {
                 </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
+            <div id="pending-location-requests" className="scroll-mt-24 grid gap-4 md:grid-cols-3">
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle>Pending Requests</CardTitle>

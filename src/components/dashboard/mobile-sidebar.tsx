@@ -10,11 +10,14 @@ import { Button } from "@/components/ui/button"
 import { Menu } from "lucide-react"
 import { NavMain } from "@/components/nav-main"
 import type { AdminRouteKey } from "@/lib/admin-routes"
+import type { AdminActivitySnapshot } from "@/lib/admin-activity"
 
 export function MobileSidebar({
     allowedRouteKeys,
+    activityCounts,
 }: {
     allowedRouteKeys: AdminRouteKey[]
+    activityCounts: AdminActivitySnapshot["counts"]
 }) {
     return (
         <Sheet>
@@ -25,7 +28,7 @@ export function MobileSidebar({
             </SheetTrigger>
             <SheetContent side="left" className="p-0 bg-background w-72">
                 <SheetTitle className="sr-only">Admin dashboard navigation</SheetTitle>
-                <NavMain mobile allowedRouteKeys={allowedRouteKeys} />
+                <NavMain mobile allowedRouteKeys={allowedRouteKeys} activityCounts={activityCounts} />
             </SheetContent>
         </Sheet>
     )
