@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Tags, Store, Bike, Users, ShieldAlert, CheckCircle2, XCircle } from "lucide-react"
+import { Tags, Store, Bike, Users, ShieldAlert, CheckCircle2, XCircle, FileText, ExternalLink } from "lucide-react"
 
 type ProductRow = {
     id: string
@@ -51,6 +51,10 @@ type RiderRow = {
     id: string
     status: string | null
     created_at: string
+    id_card_url: string | null
+    passport_photo_url: string | null
+    bike_particulars: Record<string, string> | null
+    guarantors: Record<string, string> | null
 }
 
 type MerchantRow = {
@@ -59,6 +63,7 @@ type MerchantRow = {
     business_address: string | null
     status: string | null
     created_at: string
+    kyc_data: Record<string, unknown> | null
 }
 
 type AgentRow = {
@@ -120,12 +125,12 @@ export default async function ApprovalsPage() {
             .order("created_at", { ascending: false }),
         supabase
             .from("rider_profiles")
-            .select("id, status, created_at")
+            .select("id, status, created_at, id_card_url, passport_photo_url, bike_particulars, guarantors")
             .eq("status", "pending")
             .order("created_at", { ascending: false }),
         supabase
             .from("merchants")
-            .select("id, store_name, business_address, status, created_at")
+            .select("id, store_name, business_address, status, created_at, kyc_data")
             .eq("status", "pending")
             .order("created_at", { ascending: false }),
         supabase
@@ -394,6 +399,10 @@ export default async function ApprovalsPage() {
                                             {merchant.business_address || "No business address supplied"}
                                         </div>
                                     </div>
+                                    <div className="rounded-lg border border-blue-200/60 bg-blue-50/50 p-3 dark:border-blue-900/40 dark:bg-blue-950/20">
+                                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-blue-800 dark:text-blue-200"><FileText className="h-4 w-4" /> Submitted documents</div>
+                                        {merchant.kyc_data?.documents && typeof merchant.kyc_data.documents === "object" ? <div className="flex flex-wrap gap-2">{Object.entries(merchant.kyc_data.documents as Record<string, unknown>).filter(([, url]) => typeof url === "string" && url.length > 0).map(([label, url]) => <a key={label} href={url as string} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-zinc-900 dark:text-blue-300"><ExternalLink className="h-3 w-3" />{label.replaceAll("_", " ")}</a>)}</div> : <p className="text-xs text-muted-foreground">No documents submitted.</p>}
+                                    </div>
                                     <div className="flex gap-2 w-full pt-1">
                                         <form action={approveMerchantForm} className="flex-1">
                                             <input type="hidden" name="merchant_id" value={merchant.id} />
@@ -441,6 +450,10 @@ export default async function ApprovalsPage() {
                                         <div className="pt-1 text-xs text-muted-foreground font-medium">
                                             Submitted {formatDateTime(rider.created_at)}
                                         </div>
+                                    </div>
+                                    <div className="rounded-lg border border-emerald-200/60 bg-emerald-50/50 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+                                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-emerald-800 dark:text-emerald-200"><FileText className="h-4 w-4" /> Submitted documents</div>
+                                        <div className="flex flex-wrap gap-2">{[["Passport photo", rider.passport_photo_url], ["ID card", rider.id_card_url], ["Bike license", rider.bike_particulars?.license_url], ["Insurance", rider.bike_particulars?.insurance_url], ["Roadworthiness", rider.bike_particulars?.roadworthiness_url], ["Guarantor form", rider.guarantors?.form_url], ["Guarantor ID", rider.guarantors?.id_url]].filter(([, url]) => typeof url === "string" && url.length > 0).map(([label, url]) => <a key={label} href={url as string} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-zinc-900 dark:text-emerald-300"><ExternalLink className="h-3 w-3" />{label}</a>)}</div>
                                     </div>
                                     <div className="flex gap-2 w-full pt-1">
                                         <form action={approveRiderForm} className="flex-1">
@@ -494,6 +507,10 @@ export default async function ApprovalsPage() {
                                             Submitted {formatDateTime(agent.created_at)}
                                         </div>
                                     </div>
+                                    <div className="rounded-lg border border-indigo-200/60 bg-indigo-50/50 p-3 dark:border-indigo-900/40 dark:bg-indigo-950/20">
+                                        <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-indigo-800 dark:text-indigo-200"><FileText className="h-4 w-4" /> Submitted documents</div>
+                                        {agent.id_card_url ? <a href={agent.id_card_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-zinc-900 dark:text-indigo-300"><ExternalLink className="h-3 w-3" />Open ID card</a> : <p className="text-xs text-muted-foreground">No ID card submitted.</p>}
+                                    </div>
                                     <div className="flex gap-2 w-full pt-1">
                                         <form action={approveAgentForm} className="flex-1">
                                             <input type="hidden" name="agent_id" value={agent.id} />
@@ -517,3 +534,4 @@ export default async function ApprovalsPage() {
         </div>
     )
 }
+
