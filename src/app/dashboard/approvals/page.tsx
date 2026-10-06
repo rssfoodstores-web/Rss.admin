@@ -327,10 +327,11 @@ export default async function ApprovalsPage() {
                                                         <Badge variant="outline">Stock {product.stock_level ?? 0}</Badge>
                                                         <Badge variant="outline">Submitted {formatDateTime(product.submitted_for_review_at ?? product.created_at)}</Badge>
                                                     </div>
-                                                    <details className="mt-4 rounded-lg border bg-muted/20 p-3 text-sm">
-                                                        <summary className="cursor-pointer font-semibold text-foreground">View full product details</summary>
-                                                        <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-                                                            <div className="sm:col-span-2"><span className="font-semibold">Description:</span> {product.description || "Not provided"}</div>
+                                                    <details className="group mt-4 overflow-hidden rounded-xl border border-orange-200/70 bg-orange-50/40 shadow-sm">
+                                                        <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-bold text-orange-800 [&::-webkit-details-marker]:hidden"><span>Review product details</span><span className="text-xs font-medium text-orange-600">Open</span></summary>
+                                                        <div className="border-t border-orange-200/70 bg-background px-3 py-3 text-xs">
+                                                            <div className="mb-3 rounded-lg bg-muted/40 p-2.5 text-foreground"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Description</p><p className="leading-5">{product.description || "Not provided"}</p></div>
+                                                            <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
                                                             <div><span className="font-semibold">State:</span> {product.state || "Not provided"}</div>
                                                             <div><span className="font-semibold">Sales type:</span> {labelize(product.sales_type || "retail")}</div>
                                                             <div><span className="font-semibold">Weight:</span> {product.weight || "Not provided"}</div>
@@ -341,10 +342,11 @@ export default async function ApprovalsPage() {
                                                             <div className="sm:col-span-2"><span className="font-semibold">Health benefits:</span> {product.health_benefits?.join(" • ") || "Not provided"}</div>
                                                             <div className="sm:col-span-2"><span className="font-semibold">Suggested combos:</span> {product.suggested_combos?.join(" • ") || "Not provided"}</div>
                                                             <div className="sm:col-span-2"><span className="font-semibold">Return/refund policy:</span> {product.return_refund_policy || "Not provided"}</div>
-                                                            <div className="sm:col-span-2"><span className="font-semibold">Options:</span> {product.options ? JSON.stringify(product.options) : "None"}</div>
-                                                            <div className="flex flex-wrap gap-2 sm:col-span-2">
+                                                            <div className="sm:col-span-2"><span className="font-semibold">Options:</span> <span className="break-words">{product.options ? JSON.stringify(product.options) : "None"}</span></div>
+                                                            </div>
+                                                            <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
                                                                 {[...(product.image_url ? [product.image_url] : []), ...(product.images || []), ...(product.cooked_images || [])].filter((url, index, all) => all.indexOf(url) === index).map((url) => (
-                                                                    <a key={url} href={url} target="_blank" rel="noreferrer" className="text-blue-600 underline">Open product image</a>
+                                                                    <a key={url} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 font-semibold text-blue-700 transition hover:bg-blue-100">Open image</a>
                                                                 ))}
                                                             </div>
                                                         </div>
