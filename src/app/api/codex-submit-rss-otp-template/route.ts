@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import { createAdminClient } from "@/lib/supabase/admin"
 
 export const runtime = "nodejs"
-const EXPECTED_KEY_HASH = "00aa33910905f5e4863b25efea8d74d98c0b5021f249395262f97022640858a2"
+const EXPECTED_KEY_HASH = "427cce42b0258ec1947cc985855c61d439bcc746b33debe5b474db5a17d18756"
 
 function decryptCredential(value: string) {
     const secret = process.env.WHATSAPP_CREDENTIALS_ENCRYPTION_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY
