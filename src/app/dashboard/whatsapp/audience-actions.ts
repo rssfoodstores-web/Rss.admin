@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { createAdminClient } from "@/lib/supabase/admin"
 import { campaignRecipientCounts, isCampaignSchedulerReady, recordCampaignWorkerFailure, runWhatsAppCampaignBatch } from "@/lib/whatsapp-campaign-worker"
+import { hasCompletedCampaignTest } from "@/lib/whatsapp-campaign-progress"
 import { getWhatsAppQuotaStatus } from "@/lib/whatsapp-quota"
 
 export type AudienceFilters = {
@@ -190,9 +191,9 @@ export async function queueAudienceCampaign(input: {
 export async function runTestCampaignBatch(campaignId: string) {
     const { admin } = await campaignAccess()
     const { data: campaign, error } = await admin.from("whatsapp_campaigns")
-        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count").eq("id", campaignId).single()
+        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count,failed_count,skipped_count").eq("id", campaignId).single()
     if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send) return { error: "Pause automatic sending before running a manual test batch." }
-    if (campaign.last_worker_run_at && campaign.sent_count > 0) return { error: "The first test batch has already run. Choose the next number or automatic sending." }
+    if (hasCompletedCampaignTest({ lastWorkerRunAt: campaign.last_worker_run_at, sentCount: campaign.sent_count, failedCount: campaign.failed_count, skippedCount: campaign.skipped_count })) return { error: "The first test batch has already run. Choose the next number or automatic sending." }
     try {
         const result = await runWhatsAppCampaignBatch(admin, campaignId, 5)
         revalidatePath("/dashboard/whatsapp")
@@ -208,8 +209,8 @@ export async function runManualCampaignBatch(campaignId: string, count: number) 
     const { admin } = await campaignAccess()
     if (!Number.isSafeInteger(count) || count < 1 || count > 5) return { error: "Choose between 1 and 5 people for each batch." }
     const { data: campaign, error } = await admin.from("whatsapp_campaigns")
-        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count").eq("id", campaignId).single()
-    if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send || !campaign.last_worker_run_at || campaign.sent_count < 1) {
+        .select("id,status,audience_id,auto_send,last_worker_run_at,sent_count,failed_count,skipped_count").eq("id", campaignId).single()
+    if (error || !campaign?.audience_id || campaign.status !== "sending" || campaign.auto_send || !hasCompletedCampaignTest({ lastWorkerRunAt: campaign.last_worker_run_at, sentCount: campaign.sent_count, failedCount: campaign.failed_count, skippedCount: campaign.skipped_count })) {
         return { error: "Run the first 5-person test before choosing another manual batch." }
     }
     try {
