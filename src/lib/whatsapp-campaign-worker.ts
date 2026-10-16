@@ -5,7 +5,7 @@ import { normalizeWhatsAppPhone, renderTemplate, sendMetaTemplateMessage, type W
 import { getWhatsAppQuotaStatus, WhatsAppQuotaExceededError } from "@/lib/whatsapp-quota"
 
 type Admin = ReturnType<typeof createAdminClient>
-type Recipient = { id: string; phone: string; contact_id: string | null; fields: Record<string, string> }
+type Recipient = { id: string; phone: string; contact_id: string | null; audience_recipient_id: string; fields: Record<string, string> }
 type Outcome = "failed" | "queued" | "sent" | "skipped" | "uncertain"
 
 export async function isCampaignSchedulerReady(admin: Admin) {
@@ -29,9 +29,10 @@ function sendOutcomeUnknown(error: unknown) {
 
 export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string, batchSize = 5, mode: "automatic" | "manual" = "manual") {
     const { data: campaign, error: campaignError } = await admin.from("whatsapp_campaigns")
-        .select("id,template_id,variable_defaults,created_by,status,auto_send").eq("id", campaignId).single()
+        .select("id,template_id,audience_id,variable_defaults,created_by,status,auto_send").eq("id", campaignId).single()
     if (campaignError || campaign?.status !== "sending") throw new Error("This campaign is not ready to send.")
-    if (mode === "automatic" && !campaign.auto_send) return { claimed: 0, pausedForQuota: false, rateLimited: false }
+    const outcomes = { accepted: 0, failed: 0, skipped: 0, uncertain: 0 }
+    if (mode === "automatic" && !campaign.auto_send) return { claimed: 0, pausedForQuota: false, rateLimited: false, ...outcomes }
     if (mode === "manual" && campaign.auto_send) throw new Error("Pause automatic sending before running a manual batch.")
     const { data: template, error: templateError } = await admin.from("whatsapp_templates")
         .select("name,language,body,variables,status").eq("id", campaign.template_id).single()
@@ -45,7 +46,13 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
     const { data, error } = await admin.rpc("whatsapp_claim_campaign_recipients", { p_campaign_id: campaignId, p_limit: Math.min(Math.max(batchSize, 1), 5) })
     if (error) throw new Error(error.message)
     const batch = (data ?? []) as Recipient[]
-    if (!batch.length) return { claimed: 0, pausedForQuota: false }
+    if (!batch.length) return { claimed: 0, pausedForQuota: false, rateLimited: false, ...outcomes }
+
+    // Read the saved consent evidence, rather than inferring permission from a send.
+    const { data: audienceRows, error: audienceError } = await admin.from("whatsapp_audience_recipients")
+        .select("id,consent,audience_id").in("id", batch.map((row) => row.audience_recipient_id))
+    if (audienceError) throw new Error("Could not verify the saved audience permission. No messages were sent.")
+    const audienceById = new Map((audienceRows ?? []).map((row) => [row.id, row]))
 
     const { data: contacts, error: contactsError } = await admin.from("whatsapp_contacts")
         .select("id,phone,opted_in,is_active").in("phone", batch.map((row) => row.phone))
@@ -60,6 +67,7 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
         const { data: currentCampaign, error: statusError } = await admin.from("whatsapp_campaigns").select("status").eq("id", campaignId).single()
         if (statusError) throw new Error("Could not confirm the campaign is still active.")
         let contact = contactByPhone.get(row.phone)
+        const audienceRecipient = audienceById.get(row.audience_recipient_id)
         const values = variables.map((variable) => row.fields[mapping[variable.name]]?.trim() ?? "")
         const phone = normalizeWhatsAppPhone(row.phone)
         let result: Outcome = "queued"
@@ -70,8 +78,10 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
             result = "skipped"; errorMessage = "Campaign cancelled before this message was sent."
         } else if (pausedForQuota || rateLimited) {
             errorMessage = pausedForQuota ? "Waiting for the next RSS send slot." : "Paused after Meta rate-limited this campaign."
+        } else if (audienceRecipient?.consent !== true || audienceRecipient.audience_id !== campaign.audience_id) {
+            result = "skipped"; errorMessage = "No WhatsApp permission is recorded for this audience recipient."
         } else if (contact && (!contact.opted_in || !contact.is_active)) {
-            result = "skipped"; errorMessage = "Contact withdrew WhatsApp permission or became inactive."
+            result = "skipped"; errorMessage = !contact.is_active ? "Contact is inactive." : "Contact book WhatsApp permission is off. Review consent before sending."
         } else if (!phone || values.some((value) => !value)) {
             result = "skipped"; errorMessage = "Phone number or template information is missing."
         } else {
@@ -95,10 +105,12 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
 
         if (result === "sent") {
             if (!contact && phone) {
-                const name = row.fields.customer_name?.trim() || phone
-                // A successful send is not, by itself, a consent record.
+                const name = row.fields[mapping.customer_name]?.trim() || row.fields.full_name?.trim() || phone
+                // Preserve permission already recorded in the audience. The provider's
+                // acceptance is not itself permission, and existing opt-outs are untouched.
                 const created = await admin.from("whatsapp_contacts").upsert({
-                    full_name: name, phone, source: "import", opted_in: false, is_active: true,
+                    full_name: name, phone, source: "import", opted_in: audienceRecipient?.consent === true, is_active: true,
+                    custom_fields: { whatsapp_consent: { source: "saved_audience", audience_id: audienceRecipient?.audience_id, audience_recipient_id: row.audience_recipient_id } },
                     last_message_at: new Date().toISOString(),
                 }, { onConflict: "phone", ignoreDuplicates: true })
                 if (!created.error) {
@@ -128,6 +140,8 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
             .eq("id", row.id).eq("status", "processing")
         if (updateError) throw new Error(updateError.message)
         if (result !== "queued") claimed += 1
+        if (result === "sent") outcomes.accepted += 1
+        else if (result !== "queued") outcomes[result] += 1
     }
 
     const latest = await campaignRecipientCounts(admin, campaignId)
@@ -143,6 +157,9 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
     if (status !== "sending" || pausedForQuota || rateLimited) update.auto_send = false
     if (pausedForQuota) {
         update.last_error = "RSS send allowance full. The remaining people are waiting for an admin to continue after the countdown."
+        update.last_error_at = new Date().toISOString()
+    } else if (outcomes.accepted === 0 && outcomes.skipped > 0 && !lastError) {
+        update.last_error = `No messages were sent in the last batch: ${outcomes.skipped} recipient(s) were skipped. Open See send problems for the recorded reasons.`
         update.last_error_at = new Date().toISOString()
     } else if (lastError || rateLimited) {
         update.last_error = lastError ?? "Meta rate-limited this campaign."
@@ -161,7 +178,7 @@ export async function runWhatsAppCampaignBatch(admin: Admin, campaignId: string,
             .eq("id", campaignId).eq("status", "cancelled")
         if (cancelledUpdate.error) throw new Error(cancelledUpdate.error.message)
     }
-    return { claimed, pausedForQuota, rateLimited }
+    return { claimed, pausedForQuota, rateLimited, ...outcomes }
 }
 
 export async function recordCampaignWorkerFailure(admin: Admin, campaignId: string, error: unknown) {

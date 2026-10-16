@@ -97,7 +97,7 @@ function server(overrides = {}) {
         "@/lib/whatsapp-campaign-worker": {
             isCampaignSchedulerReady: async () => true,
             runWhatsAppCampaignBatch: async (_, id, count) => {
-                calls.push(["send", id, count]); return { claimed: count, pausedForQuota: false, rateLimited: false }
+                calls.push(["send", id, count]); return { claimed: count, accepted: count, failed: 0, skipped: 0, uncertain: 0, pausedForQuota: false, rateLimited: false }
             },
         },
     })
@@ -131,4 +131,19 @@ test("server preserves five-person per-request bound", async () => {
     const { actions, calls } = server()
     for (const count of [0, 6, 1.5, NaN]) assert.match((await actions.runManualCampaignBatch(campaign.id, count)).error, /between 1 and 5/)
     assert.deepEqual(calls, [])
+})
+
+test("batch summary distinguishes acceptance from skipped processing", () => {
+    const summary = progress.campaignBatchSummary({ accepted: 0, failed: 0, skipped: 100, uncertain: 0 })
+    assert.match(summary, /0 accepted by Meta/)
+    assert.match(summary, /100 skipped/)
+})
+
+test("manual action returns accepted and skipped counts to the page", async () => {
+    const { actions } = server()
+    const result = await actions.runManualCampaignBatch(campaign.id, 3)
+    assert.equal(result.accepted, 3)
+    assert.equal(result.skipped, 0)
+    assert.equal(result.failed, 0)
+    assert.equal(result.uncertain, 0)
 })

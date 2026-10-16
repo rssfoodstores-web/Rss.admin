@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { hasCompletedCampaignTest } from "@/lib/whatsapp-campaign-progress"
+import { campaignBatchSummary, hasCompletedCampaignTest, type CampaignBatchOutcomes } from "@/lib/whatsapp-campaign-progress"
 import {
     cancelAudienceCampaign, getCampaignProblems, getCampaignReadiness, listSavedAudiences, previewDatabaseAudience, previewSavedAudience,
     queueAudienceCampaign, resumeAudienceCampaign, runManualCampaignBatch, runTestCampaignBatch, saveDatabaseAudience, setCampaignAutoSend, type AudienceFilters, type AudiencePreviewRow,
@@ -120,7 +120,13 @@ function CampaignProgressCard({ campaign, quota, workerConfigured }: { campaign:
         if (!window.confirm(`Send the next small batch (up to 5 people) for “${campaign.name}”? This sends real WhatsApp messages.`)) return
         startTransition(() => void runTestCampaignBatch(campaign.id).then((result) => {
             if (result.error) { toast.error(result.error); void refreshProblems() }
-            else toast.success(result.pausedForQuota ? "RSS allowance is full. An admin must continue after the countdown." : `First test finished: ${result.processed ?? 0} recipient(s) processed. Check the results before continuing.`)
+            else {
+                const outcomes = { accepted: result.accepted ?? 0, failed: result.failed ?? 0, skipped: result.skipped ?? 0, uncertain: result.uncertain ?? 0 }
+                if (result.pausedForQuota) toast.warning("RSS allowance is full. An admin must continue after the countdown.")
+                else if (outcomes.accepted > 0) toast.success(campaignBatchSummary(outcomes))
+                else toast.warning(`No messages accepted. ${campaignBatchSummary(outcomes)}. Check send problems before continuing.`)
+                if (outcomes.failed + outcomes.skipped + outcomes.uncertain > 0) void refreshProblems()
+            }
             router.refresh()
         }).catch(() => toast.error("The test batch could not run.")))
     }
@@ -132,18 +138,27 @@ function CampaignProgressCard({ campaign, quota, workerConfigured }: { campaign:
         setManualSending(true)
         setManualProgress(0)
         let processed = 0
+        const outcomes: CampaignBatchOutcomes = { accepted: 0, failed: 0, skipped: 0, uncertain: 0 }
         try {
             while (processed < target) {
                 const size = Math.min(5, target - processed)
                 const result = await runManualCampaignBatch(campaign.id, size)
                 if (result.error) { toast.error(result.error); void refreshProblems(); break }
                 processed += result.processed ?? 0
+                outcomes.accepted += result.accepted ?? 0
+                outcomes.failed += result.failed ?? 0
+                outcomes.skipped += result.skipped ?? 0
+                outcomes.uncertain += result.uncertain ?? 0
                 setManualProgress(processed)
                 if (result.pausedForQuota) { toast.warning("RSS allowance is full. Wait for the countdown, then an admin must continue."); break }
                 if (result.rateLimited) { toast.error("Meta rate-limited this campaign. See send problems before continuing."); break }
                 if (!result.processed || result.processed < size) break
             }
-            if (processed) toast.success(`${processed} recipient(s) processed in this manual run.`)
+            if (processed) {
+                if (outcomes.accepted > 0) toast.success(campaignBatchSummary(outcomes))
+                else toast.warning(`No messages accepted. ${campaignBatchSummary(outcomes)}. Check send problems before continuing.`)
+                if (outcomes.failed + outcomes.skipped + outcomes.uncertain > 0) void refreshProblems()
+            }
             router.refresh()
         } catch {
             toast.error("The manual run stopped. Review progress before trying again.")

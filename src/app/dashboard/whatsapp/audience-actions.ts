@@ -197,7 +197,7 @@ export async function runTestCampaignBatch(campaignId: string) {
     try {
         const result = await runWhatsAppCampaignBatch(admin, campaignId, 5)
         revalidatePath("/dashboard/whatsapp")
-        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
+        return { success: true as const, accepted: result.accepted, failed: result.failed, skipped: result.skipped, uncertain: result.uncertain, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
     } catch (runError) {
         await recordCampaignWorkerFailure(admin, campaignId, runError)
         revalidatePath("/dashboard/whatsapp")
@@ -216,7 +216,7 @@ export async function runManualCampaignBatch(campaignId: string, count: number) 
     try {
         const result = await runWhatsAppCampaignBatch(admin, campaignId, count)
         revalidatePath("/dashboard/whatsapp")
-        return { success: true as const, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
+        return { success: true as const, accepted: result.accepted, failed: result.failed, skipped: result.skipped, uncertain: result.uncertain, processed: result.claimed, pausedForQuota: result.pausedForQuota, rateLimited: result.rateLimited }
     } catch (runError) {
         await recordCampaignWorkerFailure(admin, campaignId, runError)
         revalidatePath("/dashboard/whatsapp")
