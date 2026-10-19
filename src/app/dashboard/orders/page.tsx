@@ -5,6 +5,7 @@ import { requireAdminRouteAccess } from "@/lib/admin-auth"
 import { formatDateTime, getOrderStatusClass, getPaymentStatusClass, getSettlementStatusClass, labelize, shortId } from "@/lib/admin-display"
 import { formatKobo, koboToNaira } from "@/lib/money"
 import { cn } from "@/lib/utils"
+import { Phone, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -127,6 +128,11 @@ function getProfileLabel(profile: ProfileRow | null | undefined, fallback: strin
     }
 
     return shortId(fallback)
+}
+
+function getTelephoneHref(phone: string | null | undefined) {
+    const normalized = phone?.trim().replace(/[^\d+]/g, "")
+    return normalized && /\d/.test(normalized) ? `tel:${normalized}` : null
 }
 
 function getCorporateRevenueKobo(financial: OrderFinancialRow | undefined) {
@@ -365,26 +371,44 @@ export default async function OrdersPage({ searchParams }: PageProps) {
     const openDisputeCount = disputes.filter((dispute) => dispute.status === "open" || dispute.status === "investigating").length
     const pendingRefundCount = refunds.filter((refund) => refund.status === "pending" || refund.status === "approved").length
 
+    const renderParticipant = (label: string, userId: string | null, profile: ProfileRow | null | undefined) => {
+        const telephoneHref = getTelephoneHref(profile?.phone)
+
+        return (
+            <div key={label} className="flex min-w-0 flex-col justify-between gap-3 rounded-xl border border-border/60 bg-background p-3 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+                    <div className="mt-1 truncate text-sm font-semibold text-foreground">{userId ? getProfileLabel(profile, userId) : "Not assigned"}</div>
+                    {!userId ? <div className="mt-1 text-xs text-muted-foreground">No contact until assigned</div> : telephoneHref ? <a className="mt-1 inline-flex min-h-7 items-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" href={telephoneHref}>{profile?.phone}</a> : profile?.phone ? <div className="mt-1 text-sm text-muted-foreground">{profile.phone}</div> : <div className="mt-1 text-xs text-muted-foreground">Phone not provided</div>}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                    {userId ? <Button asChild type="button" size="sm" variant="outline" className="min-h-10 flex-1 sm:flex-none"><Link href={`/dashboard/users/${encodeURIComponent(userId)}`} aria-label={`Open ${label.toLowerCase()} profile`}><UserRound className="mr-1.5 h-4 w-4" />Profile</Link></Button> : null}
+                    {telephoneHref ? <Button asChild type="button" size="sm" variant="outline" className="min-h-10 flex-1 sm:flex-none"><a href={telephoneHref} aria-label={`Call ${label.toLowerCase()}`}><Phone className="mr-1.5 h-4 w-4" />Call</a></Button> : null}
+                </div>
+            </div>
+        )
+    }
+
     return (
-        <div className="flex flex-col gap-8 animate-in fade-in slide-in-from-bottom-2 duration-700 pb-8">
+        <div className="flex min-w-0 flex-col gap-5 pb-8 sm:gap-8">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
                 <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-foreground">Orders Archive</h1>
-                    <p className="text-muted-foreground mt-1 text-base">
+                    <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Orders Archive</h1>
+                    <p className="mt-1 max-w-2xl text-sm text-muted-foreground sm:text-base">
                         Manual agent reassignment, rider overrides, dispute handling, and refund controls for the live queue.
                     </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                    <Button asChild variant="outline" className="shadow-sm">
+                <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+                    <Button asChild variant="outline" className="min-h-11 w-full shadow-sm sm:w-auto">
                         <Link href="/dashboard/reports">Open company wallet</Link>
                     </Button>
-                    <Button asChild className="shadow-sm bg-foreground text-background hover:bg-foreground/90">
+                    <Button asChild className="min-h-11 w-full bg-foreground text-background shadow-sm hover:bg-foreground/90 sm:w-auto">
                         <Link href="/dashboard/audit-logs">View audit trail</Link>
                     </Button>
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6 animate-in slide-in-from-bottom-4 duration-700 delay-150 fill-mode-both">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-3 xl:grid-cols-5">
                 <Card className="shadow-sm border-border/60 hover:shadow-md hover:border-border transition-all">
                     <CardHeader className="pb-3">
                         <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Visible Queue</CardTitle>
@@ -430,7 +454,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                         <div className="text-3xl font-bold text-foreground">{pendingRefundCount}</div>
                     </CardContent>
                 </Card>
-                <Card className="shadow-sm border-border/60 hover:shadow-md hover:border-border transition-all md:col-span-2 xl:col-span-1">
+                <Card className="col-span-2 border-border/60 shadow-sm transition-all hover:border-border hover:shadow-md md:col-span-3 xl:col-span-1">
                     <CardHeader className="pb-3">
                         <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Queue Search</CardTitle>
                         <CardDescription className="sr-only">Search by order, payment ref, or assigned actors.</CardDescription>
@@ -459,13 +483,13 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                 </Card>
             </div>
 
-            <div className="flex flex-wrap gap-2 animate-in slide-in-from-bottom-6 duration-700 delay-300 fill-mode-both">
+            <nav aria-label="Filter orders by status" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-2">
                 {STATUS_TABS.map((status) => (
                     <Link
                         key={status}
                         href={buildOrdersHref(status, requestedQuery)}
                         className={cn(
-                            "inline-flex items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition-all",
+                            "inline-flex min-h-10 shrink-0 items-center gap-2 rounded-full border px-4 py-1.5 text-sm font-medium transition-colors",
                             activeStatus === status
                                 ? "border-foreground bg-foreground text-background shadow-xs hover:bg-foreground/90"
                                 : "border-border/60 bg-muted/10 text-muted-foreground hover:bg-muted/50 hover:text-foreground"
@@ -480,7 +504,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                         </span>
                     </Link>
                 ))}
-            </div>
+            </nav>
 
             <Card className="shadow-sm border-border/60 animate-in slide-in-from-bottom-8 duration-700 delay-500 fill-mode-both overflow-hidden">
                 <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
@@ -490,9 +514,9 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                        <Table>
-                            <TableHeader className="bg-muted/20">
+                    <div className="w-full">
+                        <Table className="block w-full xl:table">
+                            <TableHeader className="hidden bg-muted/20 xl:table-header-group">
                                 <TableRow className="hover:bg-transparent">
                                     <TableHead className="py-3 px-4 font-semibold">Order</TableHead>
                                     <TableHead className="px-4 font-semibold">Routing & History</TableHead>
@@ -502,10 +526,10 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                     <TableHead className="px-4 font-semibold">Refund</TableHead>
                                 </TableRow>
                             </TableHeader>
-                            <TableBody>
+                            <TableBody className="block space-y-3 p-3 sm:p-4 xl:table-row-group xl:space-y-0 xl:p-0">
                                 {orders.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={6} className="h-32 text-center text-muted-foreground bg-muted/5">
+                                    <TableRow className="block xl:table-row">
+                                        <TableCell colSpan={6} className="block h-32 text-center text-muted-foreground xl:table-cell">
                                             No orders matched the {labelize(activeStatus)} queue.
                                         </TableCell>
                                     </TableRow>
@@ -524,64 +548,58 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                     const latestRiderAssignment = orderAssignments.find((assignment) => assignment.assignment_role === "rider")
 
                                     return (
-                                        <TableRow key={order.id} className="align-top group hover:bg-muted/30 transition-colors">
-                                            <TableCell className="min-w-[180px] p-4">
-                                                <div className="font-medium">#{shortId(order.id, 10)}</div>
-                                                <div className="text-sm text-muted-foreground">{formatDateTime(order.created_at)}</div>
+                                        <TableRow key={order.id} className="grid min-w-0 gap-3 rounded-2xl border border-border/60 bg-card p-3 shadow-sm transition-colors hover:bg-muted/20 sm:p-4 xl:table-row xl:rounded-none xl:border-0 xl:p-0 xl:shadow-none">
+                                            <TableCell className="block min-w-0 border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
+                                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                                    <div className="min-w-0">
+                                                        <div className="font-semibold">Order #{shortId(order.id, 10)}</div>
+                                                        <div className="text-sm text-muted-foreground">{formatDateTime(order.created_at)}</div>
+                                                    </div>
+                                                    <Badge variant="outline" className={cn("xl:hidden", getOrderStatusClass(order.status))}>{labelize(order.status)}</Badge>
+                                                </div>
                                                 {order.payment_ref && (
-                                                    <div className="mt-2 text-xs text-muted-foreground">Ref {order.payment_ref}</div>
+                                                    <div className="mt-2 break-all text-xs text-muted-foreground">Ref {order.payment_ref}</div>
                                                 )}
-                                                <div className="mt-3 rounded-lg border bg-muted/30 p-3 text-sm">
-                                                    <div>
-                                                        <span className="text-muted-foreground">Customer:</span>{" "}
-                                                        {getProfileLabel(customer ?? null, order.customer_id)}
-                                                    </div>
-                                                    <div>
-                                                        <span className="text-muted-foreground">Merchant:</span>{" "}
-                                                        {getProfileLabel(merchant ?? null, order.merchant_id)}
-                                                    </div>
+                                                <div className="mt-3 grid min-w-0 gap-2">
+                                                    {renderParticipant("Customer", order.customer_id, customer ?? null)}
+                                                    {renderParticipant("Merchant", order.merchant_id, merchant)}
+                                                </div>
+                                                <div className="mt-3 flex flex-wrap gap-2 xl:hidden">
+                                                    <Badge variant="outline" className={cn(getPaymentStatusClass(order.payment_status))}>{labelize(order.payment_status)}</Badge>
+                                                    <Badge variant="outline" className={cn(getSettlementStatusClass(financial?.settlement_status))}>{labelize(financial?.settlement_status ?? "legacy")}</Badge>
+                                                    {orderDisputes.length > 0 ? <Badge variant="destructive">{orderDisputes.length} dispute</Badge> : null}
+                                                    {orderRefunds.length > 0 ? <Badge variant="secondary">{labelize(orderRefunds[0].status)} refund</Badge> : null}
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="min-w-[320px]">
+                                            <TableCell className="block min-w-0 border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
                                                 <div className="space-y-3">
-                                                    <div className="rounded-lg border p-3 text-sm">
-                                                        <div className="font-medium">Current routing</div>
-                                                        <div className="mt-2 space-y-1 text-muted-foreground">
-                                                            <div>
-                                                                Agent: <span className="text-foreground">{getProfileLabel(agent ?? null, order.assigned_agent_id)}</span>
-                                                            </div>
-                                                            <div>
-                                                                Rider: <span className="text-foreground">{getProfileLabel(rider ?? null, order.rider_id)}</span>
-                                                            </div>
+                                                    <div className="rounded-xl border border-border/60 bg-muted/10 p-3 text-sm">
+                                                        <div className="font-semibold">Current routing</div>
+                                                        <div className="mt-3 grid min-w-0 gap-2">
+                                                            {renderParticipant("Agent", order.assigned_agent_id, agent)}
+                                                            {renderParticipant("Rider", order.rider_id, rider)}
                                                         </div>
                                                         <div className="mt-3 flex flex-wrap gap-2">
-                                                            {latestAgentAssignment ? (
-                                                                <Badge variant="outline">
-                                                                    Agent {labelize(latestAgentAssignment.method ?? "auto")}
-                                                                </Badge>
-                                                            ) : null}
-                                                            {latestRiderAssignment ? (
-                                                                <Badge variant="outline">
-                                                                    Rider {labelize(latestRiderAssignment.method ?? "claim")}
-                                                                </Badge>
-                                                            ) : null}
+                                                            {latestAgentAssignment ? <Badge variant="outline">Agent · {labelize(latestAgentAssignment.method ?? "auto")}</Badge> : null}
+                                                            {latestRiderAssignment ? <Badge variant="outline">Rider · {labelize(latestRiderAssignment.method ?? "claim")}</Badge> : null}
                                                         </div>
                                                     </div>
                                                     <div className="space-y-2">
-                                                        <div className="text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-                                                            Assignment history
-                                                        </div>
-                                                        {orderAssignments.length === 0 ? (
-                                                            <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
-                                                                No assignment records yet.
-                                                            </div>
-                                                        ) : (
-                                                            orderAssignments.slice(0, 3).map((assignment) => {
+                                                        <details className="group rounded-xl border border-border/60">
+                                                            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-3 py-2 text-sm font-semibold marker:hidden hover:bg-muted/30">
+                                                                <span>Assignment history</span>
+                                                                <Badge variant="secondary">{orderAssignments.length}</Badge>
+                                                            </summary>
+                                                            {orderAssignments.length === 0 ? (
+                                                                <div className="border-t border-border/60 p-3 text-sm text-muted-foreground">No assignment records yet.</div>
+                                                            ) : (
+                                                                <div className="grid gap-2 border-t border-border/60 p-3">
+                                                            {orderAssignments.slice(0, 3).map((assignment) => {
                                                                 const assignee = assignment.assignee_id ? profileMap.get(assignment.assignee_id) : null
                                                                 const assigner = assignment.assigned_by ? profileMap.get(assignment.assigned_by) : null
 
                                                                 return (
-                                                                    <div key={assignment.id} className="rounded-lg border p-3 text-sm">
+                                                                    <div key={assignment.id} className="rounded-lg border border-border/60 p-3 text-sm">
                                                                         <div className="flex flex-wrap items-center gap-2">
                                                                             <Badge variant="outline">{labelize(assignment.assignment_role)}</Badge>
                                                                             <Badge variant="outline">{labelize(assignment.method ?? "auto")}</Badge>
@@ -590,7 +608,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                             ) : null}
                                                                         </div>
                                                                         <div className="mt-2 text-muted-foreground">
-                                                                            {getProfileLabel(assignee ?? null, assignment.assignee_id)}
+                                                                            {assignment.assignee_id ? <Link className="font-medium text-foreground underline-offset-4 hover:underline" href={`/dashboard/users/${encodeURIComponent(assignment.assignee_id)}`}>{getProfileLabel(assignee ?? null, assignment.assignee_id)}</Link> : "Unassigned"}
                                                                             {assigner ? ` • by ${getProfileLabel(assigner, assignment.assigned_by)}` : ""}
                                                                         </div>
                                                                         <div className="mt-1 text-xs text-muted-foreground">
@@ -604,14 +622,16 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                         ) : null}
                                                                     </div>
                                                                 )
-                                                            })
-                                                        )}
+                                                            })}
+                                                                </div>
+                                                            )}
+                                                        </details>
                                                     </div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="min-w-[220px]">
-                                                <div className="space-y-1 text-sm">
-                                                    <div className="font-medium">{formatKobo(financial?.grand_total_kobo ?? order.total_amount)}</div>
+                                            <TableCell className="block min-w-0 border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
+                                                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3 xl:grid-cols-1">
+                                                    <div><div className="text-xs text-muted-foreground">Order total</div><div className="font-semibold">{formatKobo(financial?.grand_total_kobo ?? order.total_amount)}</div></div>
                                                     <div className="text-muted-foreground">Merchant {formatKobo(financial?.merchant_base_total_kobo ?? 0)}</div>
                                                     <div className="text-muted-foreground">Agent {formatKobo(financial?.agent_fee_total_kobo ?? 0)}</div>
                                                     <div className="text-muted-foreground">Rider {formatKobo(financial?.rider_share_kobo ?? 0)}</div>
@@ -619,7 +639,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                     <div className="text-muted-foreground">VAT {formatKobo(financial?.vat_total_kobo ?? 0)}</div>
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="min-w-[180px]">
+                                            <TableCell className="hidden min-w-[180px] border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
                                                 <div className="flex flex-col gap-2">
                                                     <Badge variant="outline" className={cn("w-fit", getOrderStatusClass(order.status))}>
                                                         {labelize(order.status)}
@@ -647,14 +667,14 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                     )}
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="min-w-[340px] p-4">
+                                            <TableCell className="block min-w-0 border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
                                                 {isTerminal ? (
                                                     <div className="rounded-lg border border-dashed border-border/60 bg-muted/20 p-4 text-xs font-medium text-muted-foreground text-center">
                                                         Overrides are disabled for terminal orders.
                                                     </div>
                                                 ) : (
                                                     <div className="grid gap-3">
-                                                        <form action={reassignOrderForm} className="grid gap-2.5 rounded-lg border border-border/60 bg-card p-3 shadow-xs">
+                                                        <form action={reassignOrderForm} className="grid gap-2.5 rounded-xl border border-border/60 bg-card p-3 shadow-xs sm:p-4">
                                                             <input type="hidden" name="order_id" value={order.id} />
                                                             <input type="hidden" name="assignment_role" value="agent" />
                                                             <div className="flex items-center justify-between gap-2">
@@ -667,7 +687,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                     <Badge variant="outline">Pending</Badge>
                                                                 )}
                                                             </div>
-                                                            <select name="new_assignee_id" defaultValue={order.assigned_agent_id ?? ""} className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:ring-1 focus:ring-ring">
+                                                            <select name="new_assignee_id" aria-label="Select approved agent" defaultValue={order.assigned_agent_id ?? ""} className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm focus:ring-1 focus:ring-ring">
                                                                 <option value="">Select approved agent</option>
                                                                 {agentOptions.map((option) => (
                                                                     <option key={option.id} value={option.id}>
@@ -675,13 +695,13 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                     </option>
                                                                 ))}
                                                             </select>
-                                                            <Input name="reason" defaultValue="Admin agent override" required className="h-8 text-xs" />
-                                                            <Button type="submit" variant="outline" size="sm" disabled={agentOptions.length === 0} className="w-full text-foreground hover:bg-muted/50 hover:text-foreground">
+                                                            <Input name="reason" aria-label="Reason for agent reassignment" defaultValue="Admin agent override" required className="h-11 text-sm" />
+                                                            <Button type="submit" variant="outline" disabled={agentOptions.length === 0} className="min-h-11 w-full text-foreground hover:bg-muted/50 hover:text-foreground">
                                                                 Reassign Agent
                                                             </Button>
                                                         </form>
 
-                                                        <form action={reassignOrderForm} className="grid gap-2.5 rounded-lg border border-border/60 bg-card p-3 shadow-xs">
+                                                        <form action={reassignOrderForm} className="grid gap-2.5 rounded-xl border border-border/60 bg-card p-3 shadow-xs sm:p-4">
                                                             <input type="hidden" name="order_id" value={order.id} />
                                                             <input type="hidden" name="assignment_role" value="rider" />
                                                             <div className="flex items-center justify-between gap-2">
@@ -694,7 +714,7 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                     <Badge variant="outline">Unassigned</Badge>
                                                                 )}
                                                             </div>
-                                                            <select name="new_assignee_id" defaultValue={order.rider_id ?? ""} className="h-9 rounded-md border border-input bg-background px-3 text-sm focus:ring-1 focus:ring-ring">
+                                                            <select name="new_assignee_id" aria-label="Select approved rider" defaultValue={order.rider_id ?? ""} className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm focus:ring-1 focus:ring-ring">
                                                                 <option value="">Select approved rider</option>
                                                                 {riderOptions.map((option) => (
                                                                     <option key={option.id} value={option.id}>
@@ -702,31 +722,32 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                                     </option>
                                                                 ))}
                                                             </select>
-                                                            <Input name="reason" defaultValue="Admin rider override" required className="h-8 text-xs" />
-                                                            <Button type="submit" variant="outline" size="sm" disabled={riderOptions.length === 0} className="w-full text-foreground hover:bg-muted/50 hover:text-foreground">
+                                                            <Input name="reason" aria-label="Reason for rider reassignment" defaultValue="Admin rider override" required className="h-11 text-sm" />
+                                                            <Button type="submit" variant="outline" disabled={riderOptions.length === 0} className="min-h-11 w-full text-foreground hover:bg-muted/50 hover:text-foreground">
                                                                 Reassign Rider
                                                             </Button>
                                                         </form>
                                                     </div>
                                                 )}
                                             </TableCell>
-                                            <TableCell className="min-w-[240px] p-4">
+                                            <TableCell className="block min-w-0 border-0 p-0 align-top xl:table-cell xl:border-b xl:p-4">
                                                 {orderRefunds.length > 0 ? (
-                                                    <div className="grid gap-2 rounded-lg border border-border/60 bg-card p-3 shadow-xs">
-                                                        <div className="text-sm font-medium">{formatKobo(orderRefunds[0].amount_kobo)}</div>
+                                                    <div className="grid gap-2 rounded-xl border border-border/60 bg-card p-3 shadow-xs sm:p-4">
+                                                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Refund</div>
+                                                        <div className="text-lg font-semibold">{formatKobo(orderRefunds[0].amount_kobo)}</div>
                                                         <div className="text-xs text-muted-foreground">{orderRefunds[0].reason}</div>
                                                         <Badge variant="outline">{labelize(orderRefunds[0].status)}</Badge>
                                                         {orderRefunds[0].status !== "processed" && (
                                                             <form action={processRefundForm}>
                                                                 <input type="hidden" name="refund_id" value={orderRefunds[0].id} />
-                                                                <Button type="submit" size="sm" className="w-full bg-foreground text-background hover:bg-foreground/90 mt-1">
+                                                                <Button type="submit" className="mt-1 min-h-11 w-full bg-foreground text-background hover:bg-foreground/90">
                                                                     Process Refund
                                                                 </Button>
                                                             </form>
                                                         )}
                                                     </div>
                                                 ) : (
-                                                    <form action={createRefundForm} className="grid gap-2 rounded-lg border border-border/60 bg-card p-3 shadow-xs">
+                                                    <form action={createRefundForm} className="grid gap-2 rounded-xl border border-border/60 bg-card p-3 shadow-xs sm:p-4">
                                                         <input type="hidden" name="order_id" value={order.id} />
                                                         <div className="text-xs font-medium text-muted-foreground">Create Refund</div>
                                                         <Input
@@ -734,11 +755,13 @@ export default async function OrdersPage({ searchParams }: PageProps) {
                                                             step="0.01"
                                                             min="0"
                                                             name="amount_naira"
+                                                            aria-label="Refund amount in naira"
                                                             defaultValue={koboToNaira(defaultRefundKobo)}
+                                                            className="h-11"
                                                             required
                                                         />
-                                                        <Input name="reason" defaultValue="Admin approved refund" required className="h-8 text-xs" />
-                                                        <Button type="submit" variant="outline" size="sm" className="w-full hover:bg-secondary transition-colors mt-1">
+                                                        <Input name="reason" aria-label="Refund reason" defaultValue="Admin approved refund" required className="h-11 text-sm" />
+                                                        <Button type="submit" variant="outline" className="mt-1 min-h-11 w-full hover:bg-secondary">
                                                             Create Refund
                                                         </Button>
                                                     </form>
